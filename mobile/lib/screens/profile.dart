@@ -14,7 +14,9 @@ class ProfileScreen extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
     final me = app.me;
     final committees = ((me['committees'] as List?) ?? []).cast<Json>();
-    final role = app.isAdmin
+    final role = app.isDeveloper
+        ? 'Developer'
+        : app.isAdmin
         ? 'Admin'
         : app.isCore
         ? 'Core committee'

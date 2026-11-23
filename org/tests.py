@@ -356,3 +356,44 @@ class PushConfigTests(Base):
         self.assertTrue(Committee.objects.filter(is_core=True).exists())
         self.assertTrue(Member.objects.get(user__email="first@x.org").is_admin)
         self.assertTrue(Invite.objects.filter(member__user__email="first@x.org").exists())
+
+
+class DeveloperTests(Base):
+    def setUp(self):
+        super().setUp()
+        from django.core.management import call_command
+
+        self.dev = make_member("Dev", "dev@x.org", [(self.edu, "member")])
+        call_command("set_developer", "dev@x.org", stdout=open("/dev/null", "w"))
+        self.dev.refresh_from_db()
+
+    def test_full_access_and_out_of_committees(self):
+        self.assertTrue(self.dev.is_developer and self.dev.admin)
+        self.assertFalse(Membership.objects.filter(member=self.dev).exists())
+        self.as_(self.dev)
+        me = self.get("bootstrap").json()["me"]
+        self.assertTrue(me["is_core"] and me["is_admin"] and me["is_developer"])
+        self.assertEqual(self.post("tasks", {"title": "x", "committee": self.fin.pk}).status_code, 201)
+        # the developer can still see and edit its own profile
+        self.assertEqual(self.get(f"members/{self.dev.pk}").status_code, 200)
+
+    def test_hidden_from_everyone_else(self):
+        self.as_(self.admin)
+        ids = [m["id"] for m in self.get("members?all=1").json()["members"]]
+        self.assertNotIn(self.dev.pk, ids)
+        self.assertNotIn(self.dev.pk, [m["id"] for m in self.get("bootstrap").json()["members"]])
+        self.assertEqual(self.get(f"members/{self.dev.pk}").status_code, 404)
+        self.assertEqual(self.patch(f"members/{self.dev.pk}", {"active": False}).status_code, 404)
+        self.assertEqual(self.post(f"members/{self.dev.pk}/invite").status_code, 404)
+        r = self.post("announcements", {"title": "All", "body": "x"})
+        self.assertFalse(Receipt.objects.filter(announcement_id=r.json()["announcement"]["id"], member=self.dev).exists())
+        start = (timezone.localtime() + timedelta(days=1)).replace(tzinfo=None).isoformat()
+        mid = self.post("meetings", {"title": "AGM", "start": start}).json()["meeting"]["id"]
+        self.assertFalse(Attendee.objects.filter(meeting_id=mid, member=self.dev).exists())
+        r = self.post("tasks", {"title": "x", "committee": self.edu.pk, "assignees": [self.dev.pk]})
+        self.assertEqual(r.status_code, 400)
+
+    def test_developer_posts_reach_everyone_but_itself(self):
+        self.as_(self.dev)
+        r = self.post("announcements", {"title": "Hello", "body": "x"})
+        self.assertEqual(r.json()["sent_to"], Member.objects.filter(is_developer=False).count())

@@ -49,6 +49,10 @@ class Member(models.Model):
     is_admin = models.BooleanField(
         "App admin", default=False, help_text="Can add people, committees and change roles."
     )
+    is_developer = models.BooleanField(
+        "Developer account", default=False,
+        help_text="Full access, hidden from the people list, announcements, meetings and stats.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -71,7 +75,7 @@ class Member(models.Model):
 
     @property
     def admin(self):
-        return self.is_admin or self.user.is_superuser
+        return self.is_admin or self.is_developer or self.user.is_superuser
 
 
 class Committee(models.Model):

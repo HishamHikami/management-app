@@ -47,6 +47,7 @@ class AppState extends ChangeNotifier {
   Json get me => (boot?['me'] as Json?) ?? const {};
   int get meId => (me['id'] as int?) ?? 0;
   bool get isAdmin => me['is_admin'] == true;
+  bool get isDeveloper => me['is_developer'] == true;
   bool get isCore => me['is_core'] == true;
   bool get canLead => me['can_lead'] == true;
   bool get canManagePeople => me['can_manage_people'] == true;

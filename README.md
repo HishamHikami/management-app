@@ -32,6 +32,10 @@ shared with other sites (~60–70 MB RAM).
 | Appoint heads | | | ✓ | ✓ |
 | Change the core committee, admins, deactivate people | | | | ✓ |
 
+A separate **developer** account (`deploy/manage.sh set_developer <email|phone|#id>`) has full
+access but is in no committee and hidden from the people list, announcements, meetings, pickers and
+stats. Use your own normal account for your committee work.
+
 ## Try it locally
 
 ```bash

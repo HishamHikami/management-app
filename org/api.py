@@ -223,6 +223,7 @@ def member_json(m, with_contact=True):
     data = member_brief(m)
     data.update({
         "is_admin": m.admin,
+        "is_developer": m.is_developer,
         "active": m.user.is_active,
         "has_password": m.user.has_usable_password(),
         "committees": [
@@ -538,7 +539,7 @@ def bootstrap(request):
     p = request.perms
     me = request.member
     committees = list(_committees_qs())
-    members = Member.objects.filter(user__is_active=True).select_related("user")
+    members = Member.objects.filter(user__is_active=True, is_developer=False).select_related("user")
     return ok({
         "org_name": settings.ORG_NAME,
         "short_name": settings.ORG_SHORT_NAME,
@@ -640,7 +641,7 @@ def home(request):
 def _assignable(perms, committee, ids):
     if not ids:
         return []
-    people = list(Member.objects.filter(pk__in=ids, user__is_active=True))
+    people = list(Member.objects.filter(pk__in=ids, user__is_active=True, is_developer=False))
     if len(people) != len(set(ids)):
         raise Bad({"assignees": ["Someone in the list was not found."]})
     if not perms.core:
@@ -865,7 +866,7 @@ def announcements(request):
             if not p.core and any(c.pk not in p.headed_ids for c in committees):
                 raise Denied("You can only post to committees you head.")
         if audience == Announcement.PEOPLE:
-            people = list(Member.objects.filter(pk__in=id_list(d, "people"), user__is_active=True))
+            people = list(Member.objects.filter(pk__in=id_list(d, "people"), user__is_active=True, is_developer=False))
             if not people:
                 raise Bad({"people": ["Choose at least one person."]})
             if not p.core:
@@ -1222,7 +1223,7 @@ def committee_members(request, pk):
     role = choice(d, "role", "Role", Membership.ROLES, Membership.MEMBER)
     _check_core_change(p, c, role)
     ids = id_list(d, "members") or ([int(d["member"])] if d.get("member") else [])
-    people = list(Member.objects.filter(pk__in=ids, user__is_active=True))
+    people = list(Member.objects.filter(pk__in=ids, user__is_active=True, is_developer=False))
     if not people:
         raise Bad({"members": ["Choose at least one person."]})
     for m in people:
@@ -1343,7 +1344,7 @@ def members(request):
             code = Invite.issue(m, by=me)
         return ok({"member": member_json(m), "code": code, "message": invite_message(m, code)}, 201)
 
-    qs = Member.objects.select_related("user").prefetch_related("memberships__committee")
+    qs = Member.objects.filter(is_developer=False).select_related("user").prefetch_related("memberships__committee")
     if not (request.GET.get("all") and p.can_manage_people()):
         qs = qs.filter(user__is_active=True)
     if request.GET.get("committee"):
@@ -1351,10 +1352,16 @@ def members(request):
     return ok({"members": [member_json(m) for m in qs.distinct()]})
 
 
+def _people_for(me):
+    """The developer account is invisible to everyone except itself."""
+    qs = Member.objects.select_related("user")
+    return qs if me.is_developer else qs.filter(is_developer=False)
+
+
 @api_view(methods=("GET", "PATCH"))
 def member_detail(request, pk):
     p, me = request.perms, request.member
-    m = _get(Member.objects.select_related("user"), pk)
+    m = _get(_people_for(me), pk)
     if request.method == "GET":
         data = member_json(m)
         data["open_tasks"] = [
@@ -1395,7 +1402,7 @@ def member_detail(request, pk):
 @api_view(methods=("POST",))
 def member_invite(request, pk):
     p, me = request.perms, request.member
-    m = _get(Member.objects.select_related("user"), pk)
+    m = _get(_people_for(me), pk)
     if not p.can_manage_people() or (m.admin and not p.admin):
         raise Denied()
     code = Invite.issue(m, by=me)

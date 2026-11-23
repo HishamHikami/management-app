@@ -104,7 +104,8 @@ class Perms:
 
 
 def active_members():
-    return Member.objects.filter(user__is_active=True)
+    """Real members: active, and not the hidden developer account."""
+    return Member.objects.filter(user__is_active=True, is_developer=False)
 
 
 # ----------------------------------------------------------------------- audiences
