@@ -74,7 +74,7 @@ def _send_one(access, device_token, kind, object_id, title, body, urgent):
             "data": {"kind": kind, "id": str(object_id or "")},
             "android": {
                 "priority": "HIGH" if urgent or kind in ("task", "meeting") else "NORMAL",
-                "notification": {"channel_id": "updates", "tag": f"{kind}-{object_id}"},
+                "notification": {"tag": f"{kind}-{object_id}"},
             },
         }
     }
