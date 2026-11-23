@@ -7,7 +7,7 @@ from django.contrib.auth.models import User
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
-from org.models import Committee, Invite, Membership, phone_digits
+from org.models import Committee, Invite, Member, Membership, phone_digits
 
 
 class Command(BaseCommand):
@@ -32,7 +32,7 @@ class Command(BaseCommand):
             user = User(username=email or f"p{phone_digits(o['phone'])}", email=email, first_name=o["name"][:150])
             user.set_unusable_password()
             user.save()
-        member = user.member
+        member, _ = Member.objects.get_or_create(user=user, defaults={"name": o["name"]})
         member.name = o["name"]
         member.phone = o["phone"] or member.phone
         member.is_admin = True

@@ -336,6 +336,15 @@ class PushConfigTests(Base):
         self.post("devices", {"token": "abc", "remove": True})
         self.assertEqual(self.mem.devices.count(), 0)
 
+    def test_every_new_user_gets_a_member(self):
+        import gc
+
+        gc.collect()  # the receiver must survive garbage collection
+        u = User.objects.create_user(username="plain", email="plain@x.org", password=PW)
+        self.assertTrue(Member.objects.filter(user=u).exists())
+        su = User.objects.create_superuser(username="root", email="root@x.org", password=PW)
+        self.assertTrue(su.member.admin)
+
     def test_setup_org_command(self):
         from io import StringIO
 

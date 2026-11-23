@@ -18,7 +18,18 @@ Create an `A` record for `ksa-riyadh.halacreative.com` pointing to the droplet's
 
 ```bash
 useradd --system --user-group --home-dir /var/lib/orgmanager --shell /usr/sbin/nologin orgmanager
-git clone https://github.com/HishamHikami/management-app.git /srv/orgmanager
+
+# The repo is private: give the server a read-only deploy key.
+ssh-keygen -t ed25519 -N '' -C 'droplet orgmanager' -f /root/.ssh/orgmanager_deploy
+cat /root/.ssh/orgmanager_deploy.pub   # GitHub → repo → Settings → Deploy keys → Add (no write access)
+cat >> /root/.ssh/config <<'CFG'
+Host github-orgmanager
+    HostName github.com
+    User git
+    IdentityFile /root/.ssh/orgmanager_deploy
+    IdentitiesOnly yes
+CFG
+git clone git@github-orgmanager:HishamHikami/management-app.git /srv/orgmanager
 cd /srv/orgmanager && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 
 install -d -m 700 /etc/orgmanager
