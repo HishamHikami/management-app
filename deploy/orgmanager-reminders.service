@@ -1,0 +1,12 @@
+# /etc/systemd/system/orgmanager-reminders.service
+[Unit]
+Description=Org Manager meeting and due-date reminders
+
+[Service]
+Type=oneshot
+User=orgmanager
+Group=orgmanager
+EnvironmentFile=/etc/orgmanager/env
+WorkingDirectory=/srv/orgmanager
+ExecStart=/srv/orgmanager/.venv/bin/python manage.py send_reminders
+MemoryMax=200M

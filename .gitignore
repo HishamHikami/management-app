@@ -1,0 +1,18 @@
+# Secrets and local data
+.env
+data/
+*.sqlite3
+*.sqlite3-*
+backups/
+firebase-service-account*.json
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+staticfiles/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store

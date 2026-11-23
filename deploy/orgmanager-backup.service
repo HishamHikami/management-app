@@ -1,0 +1,10 @@
+# /etc/systemd/system/orgmanager-backup.service
+[Unit]
+Description=Org Manager nightly database backup
+
+[Service]
+Type=oneshot
+User=orgmanager
+Group=orgmanager
+Environment=DATA_DIR=/var/lib/orgmanager
+ExecStart=/srv/orgmanager/deploy/backup.sh

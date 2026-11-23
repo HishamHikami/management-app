@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>{{ short_name }}</title>
+<style>
+  :root { --bg:#f4f7f7; --fg:#0f1f1f; --muted:#5b6b6b; --brand:#0d6e6e; --card:#fff; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#0b1414; --fg:#e6f0ef; --muted:#9db0ae; --brand:#5fd0c6; --card:#122020; } }
+  body { margin:0; min-height:100vh; display:grid; place-items:center; background:var(--bg); color:var(--fg);
+         font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .card { background:var(--card); border-radius:24px; padding:40px 32px; max-width:420px; margin:16px; text-align:center;
+          box-shadow:0 10px 40px rgba(0,0,0,.08); }
+  .logo { width:64px; height:64px; border-radius:20px; background:var(--brand); margin:0 auto 18px; display:grid; place-items:center; }
+  h1 { font-size:22px; margin:0 0 6px; } p { color:var(--muted); margin:0; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo"><svg width="34" height="34" viewBox="0 0 24 24" fill="#fff"><path d="M16 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm-8 0a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm0 2c-2.7 0-8 1.3-8 4v2h10v-2c0-1 .4-1.9 1-2.6A13 13 0 0 0 8 13Zm8 0c-2.7 0-8 1.3-8 4v2h16v-2c0-2.7-5.3-4-8-4Z"/></svg></div>
+    <h1>{{ org_name }}</h1>
+    <p>This server runs the {{ short_name }} app. Open the Android app to sign in.</p>
+  </div>
+</body>
+</html>

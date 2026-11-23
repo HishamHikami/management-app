@@ -1,0 +1,10 @@
+# /etc/systemd/system/orgmanager-reminders.timer
+[Unit]
+Description=Send Org Manager reminders every morning (Riyadh time)
+
+[Timer]
+OnCalendar=*-*-* 08:15:00 Asia/Riyadh
+Persistent=true
+
+[Install]
+WantedBy=timers.target

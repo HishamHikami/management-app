@@ -1,0 +1,12 @@
+# /etc/systemd/system/orgmanager-backup.timer
+[Unit]
+Description=Run Org Manager backup nightly
+
+[Timer]
+# 02:45, after taskmanager's 02:30 backup, so the two don't overlap.
+OnCalendar=*-*-* 02:45:00
+RandomizedDelaySec=10m
+Persistent=true
+
+[Install]
+WantedBy=timers.target
