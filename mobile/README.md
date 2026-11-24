@@ -1,4 +1,4 @@
-# KSA Riyadh Unit — Android app
+# KSA Riyadh Unit — Android & iPhone app
 
 Flutter app for the unit's server (`ksa-riyadh.halacreative.com`). Structured like
 `task-manager/mobile`: `api.dart` (HTTP client), `state.dart` (login, roles, counts, push),
@@ -42,6 +42,9 @@ keytool -genkey -v -keystore ~/ksa-riyadh-release.jks -keyalg RSA -keysize 2048 
 ## Push
 Nothing to configure in the app — see `../docs/PUSH.md`.
 
+## Release builds
+GitHub Actions builds the signed Play bundle and the TestFlight upload — see `../docs/RELEASE.md`.
+
 ## Rebranding
-Colour: `brand` in `lib/ui.dart` (+ `res/values/colors.xml`, launcher icon drawables).
+Colours: `brand` and `gold` in `lib/ui.dart` (+ `res/values/colors.xml`). Logo: `assets/seal.png`, `assets/emblem.png`; icons in `branding/` and the platform icon folders.
 Name: `ORG_NAME` / `ORG_SHORT_NAME` on the server; launcher label in `AndroidManifest.xml`.

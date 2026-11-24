@@ -49,6 +49,10 @@ class Member(models.Model):
     is_admin = models.BooleanField(
         "App admin", default=False, help_text="Can add people, committees and change roles."
     )
+    is_demo = models.BooleanField(
+        "Store-review demo", default=False,
+        help_text="Lives in the demo committee only; can't see real people or work.",
+    )
     is_developer = models.BooleanField(
         "Developer account", default=False,
         help_text="Full access, hidden from the people list, announcements, meetings and stats.",
@@ -89,6 +93,7 @@ class Committee(models.Model):
     )
     order = models.PositiveIntegerField(default=0)
     archived = models.BooleanField(default=False)
+    is_demo = models.BooleanField(default=False, help_text="Sample committee for app-store reviewers; hidden from members.")
     created_at = models.DateTimeField(auto_now_add=True)
     members = models.ManyToManyField(Member, through="Membership", related_name="committees")
 

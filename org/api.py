@@ -386,8 +386,8 @@ def committee_json(c, perms, counts=None):
     return data
 
 
-def _committees_qs():
-    return Committee.objects.filter(archived=False).prefetch_related("memberships__member__user")
+def _committees_qs(perms):
+    return perms.committees_visible(Committee.objects.filter(archived=False)).prefetch_related("memberships__member__user")
 
 
 def _task_counts(perms):
@@ -433,7 +433,7 @@ def find_user(identifier):
 
 @api_view(auth=False)
 def config(request):
-    fb = settings.FIREBASE if push.enabled() else None
+    fb = push.client_options("ios" if request.GET.get("platform") == "ios" else "android")
     return ok({
         "org_name": settings.ORG_NAME,
         "short_name": settings.ORG_SHORT_NAME,
@@ -504,6 +504,34 @@ def logout(request):
 
 
 @api_view(methods=("POST",))
+def delete_account(request):
+    """Deletes the signed-in member's personal data (required by the app stores).
+
+    Their name, contact details and password go; work they wrote stays, shown as "Former member"."""
+    me = request.member
+    user = me.user
+    if not user.check_password(str(request.data.get("password", ""))):
+        raise Bad({"password": ["Your password is not correct."]})
+    if me.is_developer:
+        raise Denied("The developer account can't be deleted from the app.")
+    with transaction.atomic():
+        ApiToken.objects.filter(user=user).delete()
+        Device.objects.filter(member=me).delete()
+        Invite.objects.filter(member=me).delete()
+        Membership.objects.filter(member=me).delete()
+        Notification.objects.filter(member=me).delete()
+        Attendee.objects.filter(member=me, meeting__start__gte=timezone.now()).delete()
+        me.name, me.phone, me.title, me.is_admin = "Former member", "", "", False
+        me.save()
+        user.username = f"deleted-{user.pk}"
+        user.email = user.first_name = user.last_name = ""
+        user.is_active = False
+        user.set_unusable_password()
+        user.save()
+    return ok()
+
+
+@api_view(methods=("POST",))
 def change_password(request):
     user = request.member.user
     if not user.check_password(str(request.data.get("old_password", ""))):
@@ -538,8 +566,8 @@ def devices(request):
 def bootstrap(request):
     p = request.perms
     me = request.member
-    committees = list(_committees_qs())
-    members = Member.objects.filter(user__is_active=True, is_developer=False).select_related("user")
+    committees = list(_committees_qs(p))
+    members = p.people_visible(Member.objects.filter(user__is_active=True)).select_related("user")
     return ok({
         "org_name": settings.ORG_NAME,
         "short_name": settings.ORG_SHORT_NAME,
@@ -611,7 +639,7 @@ def home(request):
     if p.can_lead():
         cnt = _task_counts(p)
         ids = p.leadable_committee_ids()
-        for c in _committees_qs():
+        for c in _committees_qs(p):
             if c.pk in ids:
                 overview.append(committee_json(c, p, cnt))
 
@@ -641,7 +669,7 @@ def home(request):
 def _assignable(perms, committee, ids):
     if not ids:
         return []
-    people = list(Member.objects.filter(pk__in=ids, user__is_active=True, is_developer=False))
+    people = list(perms.people_visible(Member.objects.filter(pk__in=ids, user__is_active=True)))
     if len(people) != len(set(ids)):
         raise Bad({"assignees": ["Someone in the list was not found."]})
     if not perms.core:
@@ -866,7 +894,7 @@ def announcements(request):
             if not p.core and any(c.pk not in p.headed_ids for c in committees):
                 raise Denied("You can only post to committees you head.")
         if audience == Announcement.PEOPLE:
-            people = list(Member.objects.filter(pk__in=id_list(d, "people"), user__is_active=True, is_developer=False))
+            people = list(p.people_visible(Member.objects.filter(pk__in=id_list(d, "people"), user__is_active=True)))
             if not people:
                 raise Bad({"people": ["Choose at least one person."]})
             if not p.core:
@@ -1165,16 +1193,16 @@ def committees(request):
         c = Committee(order=Committee.objects.count())
         _committee_fields(c, request.data)
         c.save()
-        c = _get(_committees_qs(), c.pk)
+        c = _get(_committees_qs(p), c.pk)
         return ok({"committee": committee_json(c, p, {})}, 201)
     counts = _task_counts(p)
-    return ok({"committees": [committee_json(c, p, counts) for c in _committees_qs()]})
+    return ok({"committees": [committee_json(c, p, counts) for c in _committees_qs(p)]})
 
 
 @api_view(methods=("GET", "PATCH", "DELETE"))
 def committee_detail(request, pk):
     p, me = request.perms, request.member
-    c = _get(_committees_qs(), pk)
+    c = _get(_committees_qs(p), pk)
     if request.method == "DELETE":
         if not p.core or c.is_core:
             raise Denied()
@@ -1223,7 +1251,7 @@ def committee_members(request, pk):
     role = choice(d, "role", "Role", Membership.ROLES, Membership.MEMBER)
     _check_core_change(p, c, role)
     ids = id_list(d, "members") or ([int(d["member"])] if d.get("member") else [])
-    people = list(Member.objects.filter(pk__in=ids, user__is_active=True, is_developer=False))
+    people = list(p.people_visible(Member.objects.filter(pk__in=ids, user__is_active=True)))
     if not people:
         raise Bad({"members": ["Choose at least one person."]})
     for m in people:
@@ -1344,7 +1372,7 @@ def members(request):
             code = Invite.issue(m, by=me)
         return ok({"member": member_json(m), "code": code, "message": invite_message(m, code)}, 201)
 
-    qs = Member.objects.filter(is_developer=False).select_related("user").prefetch_related("memberships__committee")
+    qs = p.people_visible(Member.objects.filter(is_developer=False)).select_related("user").prefetch_related("memberships__committee")
     if not (request.GET.get("all") and p.can_manage_people()):
         qs = qs.filter(user__is_active=True)
     if request.GET.get("committee"):
@@ -1352,16 +1380,14 @@ def members(request):
     return ok({"members": [member_json(m) for m in qs.distinct()]})
 
 
-def _people_for(me):
-    """The developer account is invisible to everyone except itself."""
-    qs = Member.objects.select_related("user")
-    return qs if me.is_developer else qs.filter(is_developer=False)
+def _people_for(perms):
+    return perms.people_visible(Member.objects.select_related("user"))
 
 
 @api_view(methods=("GET", "PATCH"))
 def member_detail(request, pk):
     p, me = request.perms, request.member
-    m = _get(_people_for(me), pk)
+    m = _get(_people_for(p), pk)
     if request.method == "GET":
         data = member_json(m)
         data["open_tasks"] = [
@@ -1402,7 +1428,7 @@ def member_detail(request, pk):
 @api_view(methods=("POST",))
 def member_invite(request, pk):
     p, me = request.perms, request.member
-    m = _get(_people_for(me), pk)
+    m = _get(_people_for(p), pk)
     if not p.can_manage_people() or (m.admin and not p.admin):
         raise Denied()
     code = Invite.issue(m, by=me)

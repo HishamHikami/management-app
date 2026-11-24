@@ -1,4 +1,5 @@
 import 'package:material_ui/material_ui.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../api.dart';
 import '../state.dart';
@@ -76,6 +77,12 @@ class ProfileScreen extends StatelessWidget {
                 title: Text(app.orgName),
                 subtitle: Text('${app.shortName} app · ${app.server.replaceFirst('https://', '')}'),
               ),
+              ListTile(
+                leading: const Icon(Icons.privacy_tip_outlined),
+                title: const Text('Privacy policy'),
+                trailing: const Icon(Icons.open_in_new_rounded, size: 18),
+                onTap: () => launchUrl(Uri.parse('${app.server}/privacy'), mode: LaunchMode.externalApplication),
+              ),
             ],
           ),
           const SizedBox(height: 24),
@@ -89,6 +96,49 @@ class ProfileScreen extends StatelessWidget {
                 await app.logout();
               }
             },
+          ),
+          if (!app.isDeveloper) ...[
+            const SizedBox(height: 8),
+            TextButton(
+              style: TextButton.styleFrom(foregroundColor: cs.error),
+              onPressed: () => _deleteAccount(context),
+              child: const Text('Delete my account'),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Future<void> _deleteAccount(BuildContext context) async {
+    final app = AppScope.read(context);
+    final pass = TextEditingController();
+    await showSheet(
+      context,
+      title: 'Delete my account',
+      builder: (ctx) => Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            'Your name, phone, email and password are removed and you are signed out on every phone. '
+            'Tasks, announcements and minutes you wrote stay for the unit, shown as "Former member". '
+            'This can\'t be undone; an admin can invite you again later.',
+            style: TextStyle(color: Theme.of(ctx).colorScheme.onSurfaceVariant, height: 1.4),
+          ),
+          const SizedBox(height: 14),
+          TextField(controller: pass, obscureText: true, decoration: const InputDecoration(labelText: 'Your password')),
+          const SizedBox(height: 16),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Theme.of(ctx).colorScheme.error, foregroundColor: Theme.of(ctx).colorScheme.onError),
+            onPressed: () async {
+              try {
+                await app.deleteAccount(pass.text);
+                if (ctx.mounted) Navigator.of(ctx).popUntil((r) => r.isFirst);
+              } on ApiException catch (e) {
+                if (ctx.mounted) toast(ctx, e.message, error: true);
+              }
+            },
+            child: const Text('Delete my account permanently'),
           ),
         ],
       ),

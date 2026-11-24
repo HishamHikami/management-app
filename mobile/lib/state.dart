@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -33,7 +34,7 @@ class AppState extends ChangeNotifier {
   int dataVersion = 0; // bumps after any change; screens reload on it
   OpenTarget? openTarget;
   String server = kServer;
-  String orgName = 'Karnataka Riyadh Unit';
+  String orgName = 'Karnataka Salafi Association – Riyadh Unit';
   String shortName = 'KSA Riyadh Unit';
   final messages = GlobalKey<ScaffoldMessengerState>();
   Timer? _poll;
@@ -93,7 +94,7 @@ class AppState extends ChangeNotifier {
 
   Future<void> _loadConfig() async {
     try {
-      final c = await ApiClient(baseUrl: server).get('config');
+      final c = await ApiClient(baseUrl: server).get('config', query: {'platform': Platform.isIOS ? 'ios' : 'android'});
       orgName = (c['org_name'] as String?) ?? orgName;
       shortName = (c['short_name'] as String?) ?? shortName;
       notifyListeners();
@@ -187,6 +188,19 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Deletes this account on the server (after confirming the password), then signs out.
+  Future<void> deleteAccount(String password) async {
+    await api!.post('auth/delete', {'password': password});
+    _poll?.cancel();
+    _pushToken = null;
+    _pushStarted = false;
+    api = null;
+    boot = null;
+    counts = const {};
+    await _storage.delete(key: 'token');
+    notifyListeners();
+  }
+
   Future<void> refreshBoot() async {
     if (api == null) return;
     try {
@@ -248,11 +262,14 @@ class AppState extends ChangeNotifier {
             appId: fb['appId'] as String,
             messagingSenderId: fb['messagingSenderId'] as String,
             projectId: fb['projectId'] as String,
+            iosBundleId: Platform.isIOS ? 'com.halacreative.ksariyadh' : null,
           ),
         );
       }
       final fm = FirebaseMessaging.instance;
       await fm.requestPermission();
+      // iPhone: show banners while the app is open too (Android shows an in-app snackbar instead).
+      await fm.setForegroundNotificationPresentationOptions(alert: false, badge: true, sound: true);
       _pushReady = true;
       if (!_listening) {
         _listening = true;

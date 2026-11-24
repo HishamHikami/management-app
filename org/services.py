@@ -40,8 +40,9 @@ class Perms:
         )
         self.committee_ids = {c for c, _, _ in rows}
         self.headed_ids = {c for c, r, _ in rows if r == Membership.HEAD}
-        self.admin = member.admin
-        self.core = self.admin or any(core for _, _, core in rows)
+        self.demo = member.is_demo
+        self.admin = member.admin and not self.demo
+        self.core = not self.demo and (self.admin or any(core for _, _, core in rows))
 
     # people & committees
     def can_manage_people(self):
@@ -56,8 +57,18 @@ class Perms:
 
     def leadable_committee_ids(self):
         if self.core:
-            return set(Committee.objects.filter(archived=False).values_list("pk", flat=True))
+            return set(Committee.objects.filter(archived=False, is_demo=False).values_list("pk", flat=True))
         return set(self.headed_ids)
+
+    def committees_visible(self, qs=None):
+        qs = Committee.objects.filter(archived=False) if qs is None else qs
+        return qs.filter(is_demo=self.demo)
+
+    def people_visible(self, qs=None):
+        """Developers are seen only by themselves; demo accounts and real members never see each other."""
+        qs = Member.objects.all() if qs is None else qs
+        qs = qs.filter(is_demo=self.demo)
+        return qs if self.member.is_developer else qs.filter(is_developer=False)
 
     # tasks
     def tasks_visible(self, qs=None):
@@ -105,7 +116,7 @@ class Perms:
 
 def active_members():
     """Real members: active, and not the hidden developer account."""
-    return Member.objects.filter(user__is_active=True, is_developer=False)
+    return Member.objects.filter(user__is_active=True, is_developer=False, is_demo=False)
 
 
 # ----------------------------------------------------------------------- audiences

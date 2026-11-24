@@ -1,0 +1,73 @@
+# Builds the Android App Bundle (.aab) for Google Play.
+# With the upload-key secrets set (see docs/RELEASE.md) the bundle is signed and attached to the run
+# as a download; without them it builds unsigned to prove the app compiles.
+name: Android
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, ccr-64af2a6d-20k386]
+    paths: ["mobile/**", ".github/workflows/android.yml"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FLUTTER_VERSION: "3.50.1"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install Flutter ${{ env.FLUTTER_VERSION }}
+        run: |
+          git clone --depth 1 --branch "$FLUTTER_VERSION" https://github.com/flutter/flutter.git "$RUNNER_TEMP/flutter"
+          echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
+
+      - name: Upload key
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ]; then echo "No upload key set: building unsigned."; exit 0; fi
+          echo "$KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/upload.jks"
+          {
+            echo "storeFile=$RUNNER_TEMP/upload.jks"
+            echo "storePassword=$KEYSTORE_PASSWORD"
+            echo "keyAlias=$KEY_ALIAS"
+            echo "keyPassword=${KEY_PASSWORD:-$KEYSTORE_PASSWORD}"
+          } > mobile/android/key.properties
+
+      - name: Build app bundle and APK
+        working-directory: mobile
+        run: |
+          flutter pub get
+          BUILD=$((100 + ${{ github.run_number }}))
+          flutter build appbundle --release --build-number $BUILD
+          flutter build apk --release --build-number $BUILD
+
+      - name: Remove key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/upload.jks" mobile/android/key.properties
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ksa-riyadh-android-${{ github.run_number }}
+          path: |
+            mobile/build/app/outputs/bundle/release/app-release.aab
+            mobile/build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 30

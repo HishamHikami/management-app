@@ -24,11 +24,15 @@ fi
 echo "==> Fetch $BRANCH"
 git fetch --quiet origin "$BRANCH"
 
-# This app needs no CI. Refuse to deploy code that adds GitHub workflows,
-# so a planted workflow is noticed instead of silently shipped.
-if git ls-tree -r --name-only "origin/$BRANCH" | grep -q '^\.github/workflows/'; then
-    fail "origin/$BRANCH contains .github/workflows/ — review it before deploying."
-fi
+# GitHub workflows (the app builds) run with repository secrets, so every workflow file must
+# have been reviewed: its exact contents must be listed in $ALLOWED. A new or changed workflow
+# stops the deploy until someone reads it and adds its line.
+ALLOWED="${ALLOWED_WORKFLOWS:-/etc/orgmanager/allowed-workflows.sha256}"
+for f in $(git ls-tree -r --name-only "origin/$BRANCH" -- .github/workflows); do
+    h="$(git show "origin/$BRANCH:$f" | sha256sum | cut -d' ' -f1)"
+    grep -qxF "$h  $f" "$ALLOWED" 2>/dev/null \
+        || fail "$f is new or changed. Review it (git show origin/$BRANCH:$f), then add this line to $ALLOWED:  $h  $f"
+done
 
 git checkout --quiet "$BRANCH" 2>/dev/null || git checkout --quiet -b "$BRANCH" "origin/$BRANCH"
 git merge --ff-only --quiet "origin/$BRANCH" || fail "local branch has diverged from origin/$BRANCH"

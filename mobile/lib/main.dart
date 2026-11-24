@@ -18,12 +18,18 @@ void main() {
 }
 
 ThemeData _theme(Brightness b) {
-  final scheme = ColorScheme.fromSeed(seedColor: brand, brightness: b);
-  final base = ThemeData(colorScheme: scheme, useMaterial3: true, brightness: b);
   final dark = b == Brightness.dark;
-  final bg = dark ? const Color(0xFF0B1414) : const Color(0xFFF3F6F6);
-  final card = dark ? const Color(0xFF122020) : Colors.white;
-  final line = dark ? const Color(0xFF1F3232) : const Color(0xFFE2E9E9);
+  // Navy from the logo drives the palette; gold is the accent (avatars, highlights, the + button).
+  final scheme = ColorScheme.fromSeed(seedColor: brand, brightness: b).copyWith(
+    primary: dark ? const Color(0xFFAFC6FF) : brand,
+    tertiary: dark ? gold : const Color(0xFF7A5900),
+    tertiaryContainer: dark ? const Color(0xFF4D3A05) : const Color(0xFFFFE3A0),
+    onTertiaryContainer: dark ? const Color(0xFFFFE3A0) : const Color(0xFF3D2C00),
+  );
+  final base = ThemeData(colorScheme: scheme, useMaterial3: true, brightness: b);
+  final bg = dark ? const Color(0xFF061430) : const Color(0xFFF3F5FA);
+  final card = dark ? const Color(0xFF0D1F44) : Colors.white;
+  final line = dark ? const Color(0xFF1B3060) : const Color(0xFFE1E6F0);
   return base.copyWith(
     scaffoldBackgroundColor: bg,
     cardColor: card,
@@ -49,7 +55,7 @@ ThemeData _theme(Brightness b) {
       border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(14),
-        borderSide: BorderSide(color: dark ? const Color(0xFF2A3F3F) : const Color(0xFFD8E0E0)),
+        borderSide: BorderSide(color: dark ? const Color(0xFF27407A) : const Color(0xFFD5DCE8)),
       ),
       contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
     ),
@@ -79,8 +85,8 @@ ThemeData _theme(Brightness b) {
       ),
     ),
     floatingActionButtonTheme: FloatingActionButtonThemeData(
-      backgroundColor: scheme.primary,
-      foregroundColor: scheme.onPrimary,
+      backgroundColor: gold,
+      foregroundColor: brand,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
       extendedTextStyle: const TextStyle(fontWeight: FontWeight.w700),
     ),
@@ -88,7 +94,7 @@ ThemeData _theme(Brightness b) {
       backgroundColor: card,
       surfaceTintColor: Colors.transparent,
       showDragHandle: true,
-      dragHandleColor: dark ? const Color(0xFF3A4F4F) : const Color(0xFFCAD4D4),
+      dragHandleColor: dark ? const Color(0xFF33497A) : const Color(0xFFC9D1DF),
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(28))),
       clipBehavior: Clip.antiAlias,
     ),
@@ -157,7 +163,7 @@ class UnitApp extends StatelessWidget {
 class _Splash extends StatelessWidget {
   const _Splash({super.key});
   @override
-  Widget build(BuildContext context) => const Scaffold(body: Center(child: BrandMark(size: 76)));
+  Widget build(BuildContext context) => const Scaffold(body: Center(child: BrandMark(size: 140)));
 }
 
 /// Bottom tabs. Each tab has its own navigation stack, so the tab bar stays

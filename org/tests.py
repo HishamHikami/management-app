@@ -323,11 +323,16 @@ class HomeTests(Base):
 
 
 class PushConfigTests(Base):
-    @override_settings(FIREBASE_CREDENTIALS="/nonexistent.json",
-                       FIREBASE={"projectId": "p", "apiKey": "k", "appId": "a", "messagingSenderId": "s"})
-    def test_config_exposes_public_firebase_options(self):
+    @override_settings(FIREBASE_CREDENTIALS="/nonexistent.json", FIREBASE_PROJECT_ID="p", FIREBASE_SENDER_ID="s",
+                       FIREBASE_APPS={"android": {"appId": "a-and", "apiKey": "k1"}, "ios": {"appId": "a-ios", "apiKey": "k2"}})
+    def test_config_exposes_public_firebase_options_per_platform(self):
         fb = self.client.get("/api/v1/config").json()["firebase"]
-        self.assertEqual(fb["projectId"], "p")
+        self.assertEqual((fb["projectId"], fb["appId"]), ("p", "a-and"))
+        fb = self.client.get("/api/v1/config?platform=ios").json()["firebase"]
+        self.assertEqual(fb["appId"], "a-ios")
+
+    def test_push_off_without_settings(self):
+        self.assertIsNone(self.client.get("/api/v1/config").json()["firebase"])
 
     def test_device_registration(self):
         self.as_(self.mem)
@@ -397,3 +402,63 @@ class DeveloperTests(Base):
         self.as_(self.dev)
         r = self.post("announcements", {"title": "Hello", "body": "x"})
         self.assertEqual(r.json()["sent_to"], Member.objects.filter(is_developer=False).count())
+
+
+class ReviewDemoTests(Base):
+    def setUp(self):
+        super().setUp()
+        from io import StringIO
+
+        from django.core.management import call_command
+
+        out = StringIO()
+        call_command("setup_review_demo", stdout=out)
+        self.pw = out.getvalue().split("password: ")[1].strip()
+        r = self.client.post("/api/v1/auth/login", json.dumps({"identifier": "review@ksa-riyadh.halacreative.com",
+                                                                "password": self.pw}), content_type="application/json")
+        self.reviewer_token = r.json()["token"]
+
+    def test_reviewer_sees_only_demo(self):
+        self.token = self.reviewer_token
+        b = self.get("bootstrap").json()
+        self.assertEqual([c["name"] for c in b["committees"]], ["Demo Committee"])
+        self.assertTrue(all("(demo)" in m["name"] or m["name"] == "App Reviewer" for m in b["members"]))
+        self.assertFalse(b["me"]["is_core"])
+        self.assertEqual(len(self.get("tasks?scope=all&status=any").json()["tasks"]), 4)
+        self.assertEqual(self.get(f"members/{self.mem.pk}").status_code, 404)
+        self.assertEqual(self.get(f"committees/{self.edu.pk}").status_code, 404)
+        self.assertEqual(self.get("home").status_code, 200)
+        # the reviewer can try creating things in the demo committee
+        demo = b["committees"][0]["id"]
+        self.assertEqual(self.post("tasks", {"title": "Try", "committee": demo}).status_code, 201)
+
+    def test_members_never_see_demo(self):
+        self.as_(self.admin)
+        self.assertNotIn("Demo Committee", [c["name"] for c in self.get("committees").json()["committees"]])
+        self.assertFalse(any("demo" in m["name"] for m in self.get("members?all=1").json()["members"]))
+        r = self.post("announcements", {"title": "All", "body": "x"})
+        self.assertEqual(r.json()["sent_to"], Member.objects.filter(is_demo=False, is_developer=False).count())
+
+
+class DeleteAccountTests(Base):
+    def test_delete_scrubs_personal_data(self):
+        self.as_(self.admin)
+        tid = self.post("tasks", {"title": "T", "committee": self.edu.pk}).json()["task"]["id"]
+        self.as_(self.mem)
+        self.post(f"tasks/{tid}/comments", {"body": "hello"})
+        self.assertEqual(self.post("auth/delete", {"password": "wrong"}).status_code, 400)
+        self.assertEqual(self.post("auth/delete", {"password": PW}).status_code, 200)
+        self.mem.refresh_from_db()
+        self.mem.user.refresh_from_db()
+        self.assertEqual((self.mem.name, self.mem.phone, self.mem.user.email), ("Former member", "", ""))
+        self.assertFalse(self.mem.user.is_active or self.mem.user.has_usable_password())
+        self.assertFalse(Membership.objects.filter(member=self.mem).exists())
+        self.assertEqual(self.get("bootstrap").status_code, 401)
+        # their comment is kept, shown as a former member
+        self.as_(self.admin)
+        tl = self.get(f"tasks/{tid}").json()["task"]["timeline"]
+        self.assertEqual(tl[-1]["author"]["name"], "Former member")
+
+    def test_pages(self):
+        self.assertContains(self.client.get("/privacy"), "Privacy policy")
+        self.assertContains(self.client.get("/account-deletion"), "Delete my account")

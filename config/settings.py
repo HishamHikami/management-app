@@ -34,7 +34,7 @@ if not SECRET_KEY:
 ALLOWED_HOSTS = env_list("ALLOWED_HOSTS", "localhost,127.0.0.1" if DEBUG else "")
 CSRF_TRUSTED_ORIGINS = env_list("CSRF_TRUSTED_ORIGINS")
 
-ORG_NAME = os.environ.get("ORG_NAME", "Karnataka Riyadh Unit")
+ORG_NAME = os.environ.get("ORG_NAME", "Karnataka Salafi Association – Riyadh Unit")
 ORG_SHORT_NAME = os.environ.get("ORG_SHORT_NAME", "KSA Riyadh Unit")
 
 INSTALLED_APPS = [
@@ -119,12 +119,22 @@ INVITE_DAYS = int(os.environ.get("INVITE_DAYS", "14"))
 
 # Push notifications through Firebase Cloud Messaging (optional).
 FIREBASE_CREDENTIALS = os.environ.get("FIREBASE_CREDENTIALS", "")
-FIREBASE = {
-    "projectId": os.environ.get("FIREBASE_PROJECT_ID", ""),
-    "apiKey": os.environ.get("FIREBASE_API_KEY", ""),
-    "appId": os.environ.get("FIREBASE_APP_ID", ""),
-    "messagingSenderId": os.environ.get("FIREBASE_SENDER_ID", ""),
+FIREBASE_PROJECT_ID = os.environ.get("FIREBASE_PROJECT_ID", "")
+FIREBASE_SENDER_ID = os.environ.get("FIREBASE_SENDER_ID", "")
+# Public app settings per platform (from google-services.json / GoogleService-Info.plist).
+FIREBASE_APPS = {
+    "android": {
+        "appId": os.environ.get("FIREBASE_ANDROID_APP_ID", ""),
+        "apiKey": os.environ.get("FIREBASE_ANDROID_API_KEY", ""),
+    },
+    "ios": {
+        "appId": os.environ.get("FIREBASE_IOS_APP_ID", ""),
+        "apiKey": os.environ.get("FIREBASE_IOS_API_KEY", ""),
+    },
 }
+
+# Shown on the privacy and account-deletion pages (optional).
+ORG_CONTACT_EMAIL = os.environ.get("ORG_CONTACT_EMAIL", "")
 
 SESSION_COOKIE_AGE = 60 * 60 * 12
 SESSION_COOKIE_HTTPONLY = True

@@ -8,7 +8,7 @@ from the server when it starts.
 ## 1. Create the Firebase project (free)
 1. Go to <https://console.firebase.google.com> → **Add project** (e.g. "KSA Riyadh Unit").
    Google Analytics can be off.
-2. **Add app → Android**. Package name: `com.halacreative.ksa_riyadh`. Skip downloading
+2. **Add app → Android**. Package name: `com.halacreative.ksariyadh`. Skip downloading
    `google-services.json` — it isn't needed.
 3. **Project settings → General → Your apps**: note the **App ID** (`1:…:android:…`),
    **Project ID**, **Web API key** and, under **Cloud Messaging**, the **Sender ID**.
@@ -24,16 +24,20 @@ install -m 600 -o orgmanager -g orgmanager firebase-key.json /var/lib/orgmanager
 folder because `/etc/orgmanager` is readable by root only; only the `orgmanager` user can read it.
 
 ## 3. Settings
-In `/etc/orgmanager/env`:
+In `/etc/orgmanager/env` (values from `google-services.json` and `GoogleService-Info.plist`;
+they are public app settings, but are kept out of this public repo):
 ```
 FIREBASE_CREDENTIALS=/var/lib/orgmanager/firebase.json
-FIREBASE_PROJECT_ID=your-project-id
-FIREBASE_API_KEY=AIza...
-FIREBASE_APP_ID=1:1234567890:android:abc123
-FIREBASE_SENDER_ID=1234567890
+FIREBASE_PROJECT_ID=ksa-riyadh-unit
+FIREBASE_SENDER_ID=<GCM_SENDER_ID / project_number>
+FIREBASE_ANDROID_APP_ID=<mobilesdk_app_id from google-services.json>
+FIREBASE_ANDROID_API_KEY=<api_key.current_key from google-services.json>
+FIREBASE_IOS_APP_ID=<GOOGLE_APP_ID from GoogleService-Info.plist>
+FIREBASE_IOS_API_KEY=<API_KEY from GoogleService-Info.plist>
 ```
-Then `systemctl restart orgmanager`. Open the app (sign out and in once on phones that were
-already signed in) and allow notifications. Profile → *Phone notifications* shows "On".
+Then `systemctl restart orgmanager`. Open the app and allow notifications; Profile →
+*Phone notifications* shows "On". iPhones also need the APNs key uploaded in Firebase
+(Project settings → Cloud Messaging → Apple app configuration).
 
 The server signs a short-lived token with the service account and calls Google's FCM HTTP v1
 API from a background thread — no extra Python packages or memory.

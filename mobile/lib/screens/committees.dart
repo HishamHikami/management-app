@@ -140,7 +140,7 @@ class _CoreCard extends StatelessWidget {
           gradient: const LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
-            colors: [Color(0xFF14A3A3), brand, Color(0xFF0A4F5C)],
+            colors: brandGradient,
           ),
           boxShadow: [BoxShadow(color: brand.withValues(alpha: .28), blurRadius: 20, offset: const Offset(0, 8))],
         ),

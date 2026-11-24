@@ -1,9 +1,11 @@
 # KSA Riyadh Unit — committees app
 
-A self-hosted app for **Karnataka Riyadh Unit** to run its committees: the core committee assigns
+For **Karnataka Salafi Association – Riyadh Unit**.
+
+A self-hosted app for the unit to run its committees: the core committee assigns
 work and speaks to everyone, committee heads run their teams, and every member sees what's theirs.
 
-- **Android app** (Flutter) in [`mobile/`](mobile/README.md)
+- **Android and iPhone app** (Flutter) in [`mobile/`](mobile/README.md) — built by GitHub Actions; releasing: [docs/RELEASE.md](docs/RELEASE.md), store texts: [docs/STORE.md](docs/STORE.md)
 - **Server** (Django + SQLite) at the root of this repo — a JSON API for the app, plus Django admin
 
 Built the same way as the `task-manager` app on the same server: light enough for a 1 GB droplet

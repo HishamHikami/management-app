@@ -230,8 +230,8 @@ class _Hero extends StatelessWidget {
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: dark
-              ? const [Color(0xFF0F5E5E), Color(0xFF0B3F4A)]
-              : const [Color(0xFF14A3A3), brand, Color(0xFF0A4F5C)],
+              ? brandGradientDark
+              : brandGradient,
         ),
         boxShadow: [BoxShadow(color: brand.withValues(alpha: dark ? .15 : .3), blurRadius: 24, offset: const Offset(0, 10))],
       ),

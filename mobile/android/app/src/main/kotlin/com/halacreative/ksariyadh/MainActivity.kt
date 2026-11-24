@@ -1,4 +1,4 @@
-package com.halacreative.ksa_riyadh
+package com.halacreative.ksariyadh
 
 import io.flutter.embedding.android.FlutterActivity
 

@@ -73,7 +73,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             HapticFeedback.heavyImpact();
                             _changeServer();
                           },
-                          child: const Appear(index: 0, child: BrandMark(size: 76)),
+                          child: const Appear(index: 0, child: BrandMark(size: 132)),
                         ),
                       ),
                       const SizedBox(height: 22),

@@ -10,6 +10,19 @@ def home(request):
     return render(request, "org/home.html", {"org_name": settings.ORG_NAME, "short_name": settings.ORG_SHORT_NAME})
 
 
+def _ctx():
+    return {"org_name": settings.ORG_NAME, "short_name": settings.ORG_SHORT_NAME,
+            "contact": settings.ORG_CONTACT_EMAIL}
+
+
+def privacy(request):
+    return render(request, "org/privacy.html", _ctx())
+
+
+def account_deletion(request):
+    return render(request, "org/account_deletion.html", _ctx())
+
+
 def health(request):
     return HttpResponse("ok", content_type="text/plain")
 

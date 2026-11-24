@@ -9,6 +9,7 @@ urlpatterns = [
     path("auth/invite/check", api.invite_check),
     path("auth/invite/accept", api.invite_accept),
     path("auth/password", api.change_password),
+    path("auth/delete", api.delete_account),
     path("devices", api.devices),
     path("bootstrap", api.bootstrap),
     path("counts", api.counts),

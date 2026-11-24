@@ -23,7 +23,20 @@ _lock = threading.Lock()
 
 
 def enabled():
-    return bool(settings.FIREBASE_CREDENTIALS and settings.FIREBASE.get("projectId"))
+    return bool(settings.FIREBASE_CREDENTIALS and settings.FIREBASE_PROJECT_ID)
+
+
+def client_options(platform):
+    """Public Firebase settings for the app on this platform, or None when push is off."""
+    app = settings.FIREBASE_APPS.get(platform) or settings.FIREBASE_APPS["android"]
+    if not (enabled() and app["appId"] and app["apiKey"]):
+        return None
+    return {
+        "projectId": settings.FIREBASE_PROJECT_ID,
+        "messagingSenderId": settings.FIREBASE_SENDER_ID,
+        "appId": app["appId"],
+        "apiKey": app["apiKey"],
+    }
 
 
 def _b64(data):
@@ -76,9 +89,13 @@ def _send_one(access, device_token, kind, object_id, title, body, urgent):
                 "priority": "HIGH" if urgent or kind in ("task", "meeting") else "NORMAL",
                 "notification": {"tag": f"{kind}-{object_id}"},
             },
+            "apns": {
+                "headers": {"apns-priority": "10" if urgent or kind in ("task", "meeting") else "5"},
+                "payload": {"aps": {"sound": "default", "thread-id": kind}},
+            },
         }
     }
-    url = f"https://fcm.googleapis.com/v1/projects/{settings.FIREBASE['projectId']}/messages:send"
+    url = f"https://fcm.googleapis.com/v1/projects/{settings.FIREBASE_PROJECT_ID}/messages:send"
     req = urllib.request.Request(
         url,
         data=json.dumps(msg).encode(),

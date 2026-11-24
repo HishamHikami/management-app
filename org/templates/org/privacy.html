@@ -1,0 +1,39 @@
+{% include "org/_head.html" %}
+<body>
+<div class="card doc">
+  <h1>Privacy policy</h1>
+  <p class="muted">{{ org_name }} — "{{ short_name }}" app. Last updated 24 November 2026.</p>
+
+  <p>The {{ short_name }} app is a private tool for the members of {{ org_name }} to organise committees,
+  tasks, announcements and meetings. Only people invited by the association can use it.</p>
+
+  <h2>What we store</h2>
+  <ul>
+    <li><b>Your profile</b>: name, phone number and/or email, position, and the committees you belong to — entered by an admin when you are invited, and editable by you.</li>
+    <li><b>Your password</b>, stored only as a secure hash.</li>
+    <li><b>What you do in the app</b>: tasks, comments, announcements, meeting replies, attendance and minutes, and whether you have read or acknowledged announcements.</li>
+    <li><b>A notification token</b> for your phone, so the app can send you notifications (if you allow them).</li>
+  </ul>
+
+  <h2>How it is used</h2>
+  <p>Only to run the app for the association's members. Other members see your name, position, phone and email in the member list so they can contact you, and see the work you share in the app according to your committees. We do not sell data, show ads, or use tracking or analytics.</p>
+
+  <h2>Where it is kept and who processes it</h2>
+  <ul>
+    <li>Our own server (DigitalOcean) holds all app data, with nightly backups kept for 14 days.</li>
+    <li>Google Firebase Cloud Messaging and Apple Push Notification service deliver notifications. They receive your phone's notification token and the short text of each notification.</li>
+    <li>All connections are encrypted (HTTPS).</li>
+  </ul>
+
+  <h2>Your choices</h2>
+  <ul>
+    <li>Edit your details in the app under <b>Profile → Edit my details</b>.</li>
+    <li>Turn notifications off in your phone's settings at any time.</li>
+    <li>Delete your account in the app under <b>Profile → Delete my account</b>, or see <a href="/account-deletion">how to request deletion</a>.</li>
+  </ul>
+
+  <h2>Contact</h2>
+  <p>{% if contact %}Email <a href="mailto:{{ contact }}">{{ contact }}</a>, or contact{% else %}Contact{% endif %} an admin of {{ org_name }}.</p>
+</div>
+</body>
+</html>

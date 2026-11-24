@@ -11,8 +11,13 @@ export 'picker.dart';
 
 // ---------------------------------------------------------------- colors & text
 
-/// Deep teal — the unit's colour. Change it here to rebrand the whole app.
-const brand = Color(0xFF0D6E6E);
+/// Navy and gold from the association's logo. Change them here to rebrand the app.
+const brand = Color(0xFF0B2A60);
+const gold = Color(0xFFF0C452);
+
+/// Navy gradient for hero cards.
+const brandGradient = [Color(0xFF1A4A96), brand, Color(0xFF041A45)];
+const brandGradientDark = [Color(0xFF123A7A), Color(0xFF06183D)];
 
 Color committeeColor(String? name, Brightness b) {
   final dark = b == Brightness.dark;
@@ -1512,6 +1517,7 @@ class InfoRow extends StatelessWidget {
 // ---------------------------------------------------------------- brand
 
 /// The unit's mark: a rounded tile with people.
+/// The association's logo: the full seal when large, the emblem (no small text) when small.
 class BrandMark extends StatelessWidget {
   const BrandMark({super.key, this.size = 64});
   final double size;
@@ -1520,14 +1526,14 @@ class BrandMark extends StatelessWidget {
     width: size,
     height: size,
     decoration: BoxDecoration(
-      gradient: const LinearGradient(
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-        colors: [Color(0xFF14A3A3), brand, Color(0xFF0A4F5C)],
-      ),
-      borderRadius: BorderRadius.circular(size * .3),
-      boxShadow: [BoxShadow(color: brand.withValues(alpha: .35), blurRadius: size * .35, offset: Offset(0, size * .12))],
+      shape: BoxShape.circle,
+      boxShadow: [BoxShadow(color: brand.withValues(alpha: .30), blurRadius: size * .3, offset: Offset(0, size * .08))],
     ),
-    child: Icon(Icons.diversity_3_rounded, color: Colors.white, size: size * .54),
+    child: Image.asset(
+      size >= 72 ? 'assets/seal.png' : 'assets/emblem.png',
+      width: size,
+      height: size,
+      filterQuality: FilterQuality.medium,
+    ),
   );
 }

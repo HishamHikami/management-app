@@ -1,0 +1,22 @@
+{% include "org/_head.html" %}
+<body>
+<div class="card doc">
+  <h1>Delete your account</h1>
+  <p class="muted">{{ org_name }} — "{{ short_name }}" app</p>
+
+  <h2>In the app (immediate)</h2>
+  <p>Open the app → tap your picture at the top right → <b>Profile</b> → <b>Delete my account</b>, and confirm with your password.</p>
+
+  <h2>Without the app</h2>
+  <p>{% if contact %}Email <a href="mailto:{{ contact }}?subject=Delete%20my%20account">{{ contact }}</a> or ask{% else %}Ask{% endif %} an admin of {{ org_name }} to delete your account. It is done within 7 days.</p>
+
+  <h2>What is deleted</h2>
+  <ul>
+    <li>Your name, phone number, email, position and password.</li>
+    <li>Your committee memberships, notifications, notification tokens, invitations and replies to upcoming meetings. You are signed out on every phone.</li>
+  </ul>
+  <h2>What is kept</h2>
+  <p>Tasks, comments, announcements and meeting minutes you wrote stay for the association's records, shown as written by "Former member". Server backups containing your old data are erased automatically after 14 days.</p>
+</div>
+</body>
+</html>
