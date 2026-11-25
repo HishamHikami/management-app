@@ -80,3 +80,22 @@ Also pending for the next iOS workflow change:
      head rights, or are they designations only?
    - Rename "Committees" to **"Wings"** throughout the app? (Assumed yes.)
    - "EXIT" in the wing column: a person who left; import as inactive?
+
+6. **Administration levels & permissions** (decided by the owner):
+   - Levels: **Developer** (owner, hidden) → **Super admin** → **Admin** → **Member** (+ individual permissions).
+   - **Nobody gets super admin automatically.** The owner (developer account) is the only one at the
+     start and appoints super admins / admins by hand. Only the developer or a super admin can create
+     super admins; admins can't create or change admins/super admins.
+   - **Member type selector: Executive / Member**, on every person (imported and new). Shown in People
+     as a filter / separate sections. When adding a new person: choose the type, and optionally the
+     wing(s) and designation (can also be filled in later by whoever invites them).
+   - **Executive ⇒ Admin by default** (not super admin). Members ⇒ no extra permissions.
+   - **Designations/positions stay as labels** (from the sheet or typed in): they don't grant
+     permissions by themselves.
+   - Individual permissions an admin/super admin can tick per person, each scoped to *own wing(s)* or
+     *all wings*: assign tasks · manage responsibilities · post announcements · call meetings ·
+     publish public content · manage wing members.
+   - The sheet import (done on the server) lists everyone in People with phone, type, wings and
+     designations; status *Not invited* until someone sends their invite code.
+   Open question: after the import, should the 18 Executives become admins **straight away** (default
+   rule applies), or stay without admin until the owner confirms each one?
