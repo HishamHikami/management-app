@@ -46,8 +46,21 @@ class Member(models.Model):
     phone = models.CharField(max_length=30, blank=True)
     phone_key = models.CharField(max_length=30, blank=True, db_index=True, editable=False)
     title = models.CharField("Position / title", max_length=80, blank=True)
-    is_admin = models.BooleanField(
-        "App admin", default=False, help_text="Can add people, committees and change roles."
+    EXECUTIVE, MEMBER = "executive", "member"
+    TYPES = [(EXECUTIVE, "Executive"), (MEMBER, "Member")]
+    SUPER, ADMIN = "super", "admin"
+    LEVELS = [("", "Member"), (ADMIN, "Admin"), (SUPER, "Super admin")]
+
+    member_type = models.CharField(max_length=10, choices=TYPES, default=MEMBER)
+    unit_place = models.CharField("Unit place", max_length=60, blank=True)
+    level = models.CharField(
+        max_length=5, choices=LEVELS, default="", blank=True,
+        help_text="Super admins manage everything incl. admins; admins manage everything else.",
+    )
+    notes = models.TextField("Private notes", blank=True, help_text="Only admins see these.")
+    needs_followup = models.BooleanField(default=False)
+    is_public = models.BooleanField(
+        "Public user", default=False, help_text="Registered from the public side; not a member."
     )
     is_demo = models.BooleanField(
         "Store-review demo", default=False,
@@ -78,8 +91,16 @@ class Member(models.Model):
         return self.user.is_active
 
     @property
+    def is_admin(self):
+        return self.level in (self.ADMIN, self.SUPER)
+
+    @property
+    def super(self):
+        return self.level == self.SUPER or self.is_developer or self.user.is_superuser
+
+    @property
     def admin(self):
-        return self.is_admin or self.is_developer or self.user.is_superuser
+        return self.super or self.level == self.ADMIN
 
 
 class Committee(models.Model):
@@ -376,3 +397,173 @@ class Notification(models.Model):
     class Meta:
         ordering = ["-created_at"]
         indexes = [models.Index(fields=["member", "read_at"])]
+
+
+# ----------------------------------------------------------------------- permissions
+
+
+class Grant(models.Model):
+    """A permission given to one person, for their own wings or for all wings."""
+
+    TASKS, RESPONSIBILITIES, ANNOUNCEMENTS, MEETINGS = "tasks", "responsibilities", "announcements", "meetings"
+    PUBLIC, PEOPLE, RESETS = "public", "people", "password_resets"
+    PERMS = [
+        (TASKS, "Assign tasks"),
+        (RESPONSIBILITIES, "Manage responsibilities"),
+        (ANNOUNCEMENTS, "Post announcements"),
+        (MEETINGS, "Call meetings"),
+        (PUBLIC, "Publish public content"),
+        (PEOPLE, "Manage wing members"),
+        (RESETS, "Handle password resets"),
+    ]
+    WING_SCOPED = {TASKS, RESPONSIBILITIES, ANNOUNCEMENTS, MEETINGS, PEOPLE}
+
+    member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="grants")
+    perm = models.CharField(max_length=20, choices=PERMS)
+    all_wings = models.BooleanField(default=False)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["member", "perm"], name="one_grant")]
+
+
+# ----------------------------------------------------------------------- responsibilities
+
+
+class Responsibility(models.Model):
+    """A recurring duty. Its holder chooses how often it repeats and when to be reminded."""
+
+    DAILY, WEEKLY, MONTHLY, ONCE = "daily", "weekly", "monthly", "once"
+    REPEATS = [(DAILY, "Every day"), (WEEKLY, "Every week"), (MONTHLY, "Every month"), (ONCE, "Once")]
+    NONE, SAME_DAY, DAY_BEFORE = "none", "same_day", "day_before"
+    REMINDS = [(NONE, "No reminder"), (SAME_DAY, "Morning of the day"), (DAY_BEFORE, "The day before")]
+
+    title = models.CharField(max_length=200)
+    description = models.TextField(blank=True)
+    committee = models.ForeignKey(Committee, on_delete=models.SET_NULL, null=True, blank=True,
+                                  related_name="responsibilities")
+    holder = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="responsibilities")
+    created_by = models.ForeignKey(Member, on_delete=models.SET_NULL, null=True, related_name="+")
+    repeat = models.CharField(max_length=8, choices=REPEATS, default=WEEKLY)
+    weekday = models.PositiveSmallIntegerField(null=True, blank=True, help_text="0 = Monday")
+    monthday = models.PositiveSmallIntegerField(null=True, blank=True)
+    start_date = models.DateField(default=timezone.localdate)
+    remind = models.CharField(max_length=10, choices=REMINDS, default=SAME_DAY)
+    active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["title"]
+
+    def __str__(self):
+        return self.title
+
+    def occurs_on(self, d):
+        if d < self.start_date:
+            return False
+        if self.repeat == self.DAILY:
+            return True
+        if self.repeat == self.WEEKLY:
+            return d.weekday() == (self.weekday if self.weekday is not None else self.start_date.weekday())
+        if self.repeat == self.MONTHLY:
+            import calendar
+
+            want = self.monthday or self.start_date.day
+            last = calendar.monthrange(d.year, d.month)[1]
+            return d.day == min(want, last)
+        return d == self.start_date
+
+    def occurrences(self, start, end):
+        d = max(start, self.start_date)
+        while d <= end:
+            if self.occurs_on(d):
+                yield d
+            d += timedelta(days=1)
+
+
+class ResponsibilityDone(models.Model):
+    responsibility = models.ForeignKey(Responsibility, on_delete=models.CASCADE, related_name="done")
+    due_date = models.DateField()
+    done_by = models.ForeignKey(Member, on_delete=models.SET_NULL, null=True, related_name="+")
+    done_at = models.DateTimeField(auto_now_add=True)
+    note = models.CharField(max_length=500, blank=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["responsibility", "due_date"], name="one_done")]
+        ordering = ["-due_date"]
+
+
+# ----------------------------------------------------------------------- public side
+
+
+class Program(models.Model):
+    """A recurring public programme, e.g. QHLS (Quran, Hadith, Learning, School)."""
+
+    name = models.CharField(max_length=120)
+    short_name = models.CharField(max_length=20, blank=True)
+    description = models.TextField(blank=True)
+    schedule = models.CharField(max_length=200, blank=True, help_text="e.g. Every Friday after Isha")
+    location = models.CharField(max_length=200, blank=True)
+    registration_url = models.URLField(blank=True)
+    active = models.BooleanField(default=True)
+    order = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["order", "name"]
+
+    def __str__(self):
+        return self.name
+
+
+class ProgramResource(models.Model):
+    program = models.ForeignKey(Program, on_delete=models.CASCADE, related_name="resources")
+    title = models.CharField(max_length=200)
+    url = models.URLField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+
+class PublicPost(models.Model):
+    NEWS, EVENT, LIVE, VIDEO = "news", "event", "live", "video"
+    KINDS = [(NEWS, "Announcement"), (EVENT, "Event"), (LIVE, "Live"), (VIDEO, "Video")]
+    CATEGORIES = [("qhls", "QHLS"), ("event", "Events"), ("lecture", "Lectures"), ("other", "Other")]
+
+    kind = models.CharField(max_length=6, choices=KINDS, default=NEWS)
+    title = models.CharField(max_length=200)
+    body = models.TextField(blank=True)
+    starts_at = models.DateTimeField(null=True, blank=True)
+    ends_at = models.DateTimeField(null=True, blank=True)
+    location = models.CharField(max_length=200, blank=True)
+    link = models.URLField(blank=True, help_text="YouTube / live stream / registration link")
+    category = models.CharField(max_length=10, choices=CATEGORIES, blank=True)
+    program = models.ForeignKey(Program, on_delete=models.SET_NULL, null=True, blank=True, related_name="posts")
+    pinned = models.BooleanField(default=False)
+    created_by = models.ForeignKey(Member, on_delete=models.SET_NULL, null=True, related_name="+")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-pinned", "-created_at"]
+
+    def __str__(self):
+        return self.title
+
+    @property
+    def is_live(self):
+        if self.kind != self.LIVE:
+            return False
+        now = timezone.now()
+        start = self.starts_at or self.created_at
+        end = self.ends_at or (start + timedelta(hours=3))
+        return start <= now <= end
+
+
+class PasswordResetRequest(models.Model):
+    phone = models.CharField(max_length=30)
+    member = models.ForeignKey(Member, on_delete=models.CASCADE, null=True, blank=True, related_name="+")
+    created_at = models.DateTimeField(auto_now_add=True)
+    handled_at = models.DateTimeField(null=True, blank=True)
+    handled_by = models.ForeignKey(Member, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+
+    class Meta:
+        ordering = ["handled_at", "-created_at"]

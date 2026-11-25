@@ -67,7 +67,7 @@ class Command(BaseCommand):
             u = User.objects.create_user(username=email, email=email, password=PASSWORD, first_name=name)
             mem = u.member
             mem.name, mem.phone, mem.title = name, phone, title
-            mem.is_admin = email.startswith("admin")
+            mem.level = "super" if email.startswith("admin") else ""
             mem.save()
             for cname, role in roles:
                 Membership.objects.create(member=mem, committee=c[cname], role=role)

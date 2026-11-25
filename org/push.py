@@ -79,10 +79,10 @@ def _access_token():
         return _token["value"]
 
 
-def _send_one(access, device_token, kind, object_id, title, body, urgent):
+def _send_one(access, device_token, kind, object_id, title, body, urgent, topic=None):
     msg = {
         "message": {
-            "token": device_token,
+            **({"topic": topic} if topic else {"token": device_token}),
             "notification": {"title": title, "body": body},
             "data": {"kind": kind, "id": str(object_id or "")},
             "android": {
@@ -141,5 +141,19 @@ def send_async(member_ids, kind, object_id, title, body, urgent=False):
             log.warning("Push failed: %s", e)
         finally:
             close_old_connections()
+
+    threading.Thread(target=run, daemon=True).start()
+
+
+def send_topic_async(topic, kind, object_id, title, body, urgent=False):
+    """One push to every phone subscribed to a topic (the app subscribes everyone to "public")."""
+    if not enabled():
+        return
+
+    def run():
+        try:
+            _send_one(_access_token(), None, kind, object_id, title, body, urgent, topic=topic)
+        except Exception as e:  # noqa: BLE001
+            log.warning("Topic push failed: %s", e)
 
     threading.Thread(target=run, daemon=True).start()

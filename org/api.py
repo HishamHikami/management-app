@@ -34,12 +34,15 @@ from .models import (
     Attendee,
     Committee,
     Device,
+    Grant,
     Invite,
     Meeting,
     Member,
     Membership,
     Notification,
+    PublicPost,
     Receipt,
+    Responsibility,
     Task,
     TaskUpdate,
     phone_digits,
@@ -216,21 +219,32 @@ def committee_brief(c):
 def member_brief(m):
     if m is None:
         return None
-    return {"id": m.pk, "name": m.name, "title": m.title, "phone": m.phone, "email": m.user.email}
+    return {"id": m.pk, "name": m.name, "title": m.title, "phone": m.phone, "email": m.user.email,
+            "member_type": m.member_type, "unit_place": m.unit_place}
 
 
-def member_json(m, with_contact=True):
+def member_json(m, with_contact=True, viewer=None):
     data = member_brief(m)
     data.update({
         "is_admin": m.admin,
+        "is_super": m.super,
+        "level": "super" if m.super else m.level,
         "is_developer": m.is_developer,
+        "is_public": m.is_public,
+        "member_type": m.member_type,
+        "unit_place": m.unit_place,
         "active": m.user.is_active,
         "has_password": m.user.has_usable_password(),
+        "status": member_status(m),
         "committees": [
-            {**committee_brief(ms.committee), "role": ms.role, "position": ms.position}
+            {**committee_brief(ms.committee), "position": ms.position}
             for ms in m.memberships.select_related("committee").filter(committee__archived=False)
         ],
     })
+    if viewer is not None and viewer.can_manage_people():
+        data["notes"] = m.notes
+        data["needs_followup"] = m.needs_followup
+        data["permissions"] = {g.perm: ("all" if g.all_wings else "own") for g in m.grants.all()}
     if not with_contact:
         data.pop("phone")
         data.pop("email")
@@ -372,13 +386,14 @@ def notification_json(n):
 
 
 def committee_json(c, perms, counts=None):
-    heads = [ms.member for ms in c.memberships.all() if ms.role == Membership.HEAD]
+    heads = [ms for ms in c.memberships.all() if ms.position and ms.position.lower() != "member"]
     data = committee_brief(c)
     data.update({
         "description": c.description,
         "member_count": len(c.memberships.all()),
-        "heads": [member_brief(h) for h in heads],
-        "my_role": next((ms.role for ms in c.memberships.all() if ms.member_id == perms.member.pk), None),
+        "heads": [{**member_brief(ms.member), "position": ms.position} for ms in heads],
+        "my_role": next(((ms.position or "member") for ms in c.memberships.all()
+                         if ms.member_id == perms.member.pk), None),
         "can_manage": perms.can_manage_committee(c.pk),
     })
     if counts is not None:
@@ -521,7 +536,7 @@ def delete_account(request):
         Membership.objects.filter(member=me).delete()
         Notification.objects.filter(member=me).delete()
         Attendee.objects.filter(member=me, meeting__start__gte=timezone.now()).delete()
-        me.name, me.phone, me.title, me.is_admin = "Former member", "", "", False
+        me.name, me.phone, me.title, me.level, me.notes = "Former member", "", "", "", ""
         me.save()
         user.username = f"deleted-{user.pk}"
         user.email = user.first_name = user.last_name = ""
@@ -571,9 +586,11 @@ def bootstrap(request):
     return ok({
         "org_name": settings.ORG_NAME,
         "short_name": settings.ORG_SHORT_NAME,
-        "me": {**member_json(me), "is_core": p.core, "headed_ids": sorted(p.headed_ids),
-               "can_lead": p.can_lead(), "can_manage_people": p.can_manage_people()},
+        "me": {**member_json(me), "is_core": p.core, "is_super": p.super, "headed_ids": sorted(p.headed_ids),
+               "can_lead": p.can_lead(), "can_manage_people": p.can_manage_people(),
+               "permissions": p.permissions()},
         "leadable_ids": sorted(p.leadable_committee_ids()),
+        "leadable": {perm: sorted(p.wings_for(perm)) for perm, _ in Grant.PERMS},
         "committees": [committee_brief(c) for c in committees],
         "members": [
             {**member_brief(m), "committee_ids": [ms.committee_id for ms in m.memberships.all()]}
@@ -586,6 +603,16 @@ def bootstrap(request):
             "colors": [v for v, _ in COLORS],
             "rsvps": [{"value": v, "label": l} for v, l in Attendee.RSVPS if v != Attendee.PENDING],
             "attendance": [{"value": v, "label": l} for v, l in Attendee.ATTENDANCE if v],
+            "permissions": [{"value": v, "label": l, "wing_scoped": v in Grant.WING_SCOPED} for v, l in Grant.PERMS],
+            "member_types": [{"value": v, "label": l} for v, l in Member.TYPES],
+            "levels": [{"value": v, "label": l} for v, l in Member.LEVELS],
+            "repeats": [{"value": v, "label": l} for v, l in Responsibility.REPEATS],
+            "reminds": [{"value": v, "label": l} for v, l in Responsibility.REMINDS],
+            "post_kinds": [{"value": v, "label": l} for v, l in PublicPost.KINDS],
+            "video_categories": [{"value": v, "label": l} for v, l in PublicPost.CATEGORIES],
+            "unit_places": sorted(set(Member.objects.exclude(unit_place="").values_list("unit_place", flat=True))),
+            "positions": ["Chairman", "Asst. Chairman", "Convenor", "Member"],
+            "designations": ["President", "Vice President", "Secretary", "Joint Secretary", "Treasurer"],
         },
         "push": push.enabled(),
     })
@@ -638,7 +665,7 @@ def home(request):
     overview = []
     if p.can_lead():
         cnt = _task_counts(p)
-        ids = p.leadable_committee_ids()
+        ids = p.headed_ids
         for c in _committees_qs(p):
             if c.pk in ids:
                 overview.append(committee_json(c, p, cnt))
@@ -672,14 +699,14 @@ def _assignable(perms, committee, ids):
     people = list(perms.people_visible(Member.objects.filter(pk__in=ids, user__is_active=True)))
     if len(people) != len(set(ids)):
         raise Bad({"assignees": ["Someone in the list was not found."]})
-    if not perms.core:
+    if not perms.all_wings(Grant.TASKS):
         allowed = set(Membership.objects.filter(committee=committee).values_list("member_id", flat=True))
         if any(m.pk not in allowed for m in people):
             raise Bad({"assignees": ["You can only assign people in this committee."]})
     return people
 
 
-def _committee_for_lead(perms, d, key="committee"):
+def _committee_for_lead(perms, d, key="committee", perm=Grant.TASKS):
     try:
         cid = int(d.get(key) or 0)
     except (TypeError, ValueError):
@@ -687,8 +714,8 @@ def _committee_for_lead(perms, d, key="committee"):
     c = Committee.objects.filter(pk=cid, archived=False).first()
     if not c:
         raise Bad({key: ["Choose a committee."]})
-    if c.pk not in perms.leadable_committee_ids():
-        raise Denied("You can only do this for committees you lead.")
+    if c.pk not in perms.wings_for(perm):
+        raise Denied("You don't have permission for this wing.")
     return c
 
 
@@ -701,8 +728,8 @@ def _desk(committee, people):
 def tasks(request):
     p, me = request.perms, request.member
     if request.method == "POST":
-        if not p.can_lead():
-            raise Denied("Only the core committee and committee heads can create tasks.")
+        if not p.can_lead(Grant.TASKS):
+            raise Denied("You don't have permission to assign tasks.")
         d = request.data
         title = text(d, "title", "Title", 200, required=True)
         committee = _committee_for_lead(p, d)
@@ -772,7 +799,7 @@ def task_detail(request, pk):
     if request.method == "GET":
         return ok({"task": _task_detail(t, p)})
     if not p.can_manage_task(t):
-        raise Denied("Only the person who created this task, its committee head or the core committee can change it.")
+        raise Denied("Only the person who created this task, or someone with task permission for its wing, can change it.")
     if request.method == "DELETE":
         t.delete()
         return ok()
@@ -879,32 +906,33 @@ def task_assign(request, pk):
 def announcements(request):
     p, me = request.perms, request.member
     if request.method == "POST":
-        if not p.can_lead():
-            raise Denied("Only the core committee and committee heads can post announcements.")
+        if not p.can_lead(Grant.ANNOUNCEMENTS):
+            raise Denied("You don't have permission to post announcements.")
         d = request.data
         audience = choice(d, "audience", "Audience", Announcement.AUDIENCES, Announcement.ALL)
         committees, people = [], []
-        if audience == Announcement.ALL and not p.core:
-            raise Denied("Only the core committee can post to everyone.")
+        mine = p.wings_for(Grant.ANNOUNCEMENTS)
+        if audience == Announcement.ALL and not p.all_wings(Grant.ANNOUNCEMENTS):
+            raise Denied("You can only post to your own wings.")
         if audience == Announcement.COMMITTEES:
             ids = set(id_list(d, "committees"))
             committees = list(Committee.objects.filter(pk__in=ids, archived=False))
             if not committees:
                 raise Bad({"committees": ["Choose at least one committee."]})
-            if not p.core and any(c.pk not in p.headed_ids for c in committees):
-                raise Denied("You can only post to committees you head.")
+            if any(c.pk not in mine for c in committees):
+                raise Denied("You can only post to your own wings.")
         if audience == Announcement.PEOPLE:
             people = list(p.people_visible(Member.objects.filter(pk__in=id_list(d, "people"), user__is_active=True)))
             if not people:
                 raise Bad({"people": ["Choose at least one person."]})
-            if not p.core:
-                allowed = set(Membership.objects.filter(committee_id__in=p.headed_ids).values_list("member_id", flat=True))
+            if not p.all_wings(Grant.ANNOUNCEMENTS):
+                allowed = set(Membership.objects.filter(committee_id__in=mine).values_list("member_id", flat=True))
                 if any(x.pk not in allowed for x in people):
                     raise Denied("You can only message people in committees you head.")
         posted_as = None
         if d.get("posted_as"):
-            posted_as = _committee_for_lead(p, d, "posted_as")
-        elif p.core:
+            posted_as = _committee_for_lead(p, d, "posted_as", perm=Grant.ANNOUNCEMENTS)
+        elif p.all_wings(Grant.ANNOUNCEMENTS) and audience == Announcement.ALL:
             posted_as = Committee.objects.filter(is_core=True, archived=False).first()
         elif committees:
             posted_as = committees[0]
@@ -913,7 +941,7 @@ def announcements(request):
                 title=text(d, "title", "Title", 200, required=True),
                 body=text(d, "body", "Message", 10000, required=True),
                 author=me, posted_as=posted_as, audience=audience,
-                pinned=flag(d, "pinned") and p.core,
+                pinned=flag(d, "pinned") and p.admin,
                 urgent=flag(d, "urgent"),
                 requires_ack=flag(d, "requires_ack"),
             )
@@ -965,7 +993,7 @@ def announcement_detail(request, pk):
         a.title = text(d, "title", "Title", 200, required=True)
     if "body" in d:
         a.body = text(d, "body", "Message", 10000, required=True)
-    if "pinned" in d and p.core:
+    if "pinned" in d and p.admin:
         a.pinned = flag(d, "pinned")
     if "urgent" in d:
         a.urgent = flag(d, "urgent")
@@ -1050,14 +1078,14 @@ def _meeting_fields(m, d, partial=False):
 def meetings(request):
     p, me = request.perms, request.member
     if request.method == "POST":
-        if not p.can_lead():
-            raise Denied("Only the core committee and committee heads can call meetings.")
+        if not p.can_lead(Grant.MEETINGS):
+            raise Denied("You don't have permission to call meetings.")
         d = request.data
         committee = None
         if d.get("committee"):
-            committee = _committee_for_lead(p, d)
-        elif not p.core:
-            raise Denied("Only the core committee can call a general meeting.")
+            committee = _committee_for_lead(p, d, perm=Grant.MEETINGS)
+        elif not p.all_wings(Grant.MEETINGS):
+            raise Denied("Only someone with meetings permission for all wings can call a general meeting.")
         m = Meeting(committee=committee, created_by=me)
         _meeting_fields(m, d)
         with transaction.atomic():
@@ -1188,8 +1216,8 @@ def _committee_fields(c, d, partial=False):
 def committees(request):
     p = request.perms
     if request.method == "POST":
-        if not p.core:
-            raise Denied("Only the core committee can add committees.")
+        if not p.admin:
+            raise Denied("Only admins can add wings.")
         c = Committee(order=Committee.objects.count())
         _committee_fields(c, request.data)
         c.save()
@@ -1204,19 +1232,19 @@ def committee_detail(request, pk):
     p, me = request.perms, request.member
     c = _get(_committees_qs(p), pk)
     if request.method == "DELETE":
-        if not p.core or c.is_core:
+        if not p.admin or c.is_core:
             raise Denied()
         c.archived = True
         c.save()
         return ok()
     if request.method == "PATCH":
-        if not p.core:
-            raise Denied("Only the core committee can edit committees.")
+        if not p.admin:
+            raise Denied("Only admins can edit wings.")
         _committee_fields(c, request.data, partial=True)
         c.save()
     data = committee_json(c, p, _task_counts(p))
     data["members"] = [
-        {**member_brief(ms.member), "role": ms.role, "position": ms.position}
+        {**member_brief(ms.member), "position": ms.position}
         for ms in c.memberships.all()
         if ms.member.user.is_active
     ]
@@ -1234,59 +1262,54 @@ def committee_detail(request, pk):
     return ok({"committee": data})
 
 
-def _check_core_change(p, c, role=None):
-    if c.is_core and not p.admin:
-        raise Denied("Only an admin can change who is on the core committee.")
-    if role == Membership.HEAD and not p.core:
-        raise Denied("Only the core committee can appoint heads.")
+def _wing_positions(d):
+    """[{id, position}] from the request → [(Committee, position)]."""
+    rows = d.get("committees") or []
+    if not isinstance(rows, list):
+        raise Bad({"committees": ["Send a list."]})
+    out = []
+    for r in rows:
+        try:
+            c = Committee.objects.get(pk=int(r.get("id")), archived=False)
+        except (Committee.DoesNotExist, TypeError, ValueError, AttributeError):
+            raise Bad({"committees": ["Unknown wing."]})
+        out.append((c, str(r.get("position") or "").strip()[:60]))
+    return out
 
 
 @api_view(methods=("POST",))
 def committee_members(request, pk):
     p = request.perms
-    c = _get(Committee.objects.filter(archived=False), pk)
+    c = _get(p.committees_visible(), pk)
     if not p.can_manage_committee(c.pk):
         raise Denied()
     d = request.data
-    role = choice(d, "role", "Role", Membership.ROLES, Membership.MEMBER)
-    _check_core_change(p, c, role)
     ids = id_list(d, "members") or ([int(d["member"])] if d.get("member") else [])
     people = list(p.people_visible(Member.objects.filter(pk__in=ids, user__is_active=True)))
     if not people:
         raise Bad({"members": ["Choose at least one person."]})
     for m in people:
-        Membership.objects.update_or_create(
-            member=m, committee=c, defaults={"role": role, "position": text(d, "position", "Position", 60)}
-        )
+        Membership.objects.update_or_create(member=m, committee=c,
+                                            defaults={"position": text(d, "position", "Position", 60)})
     return ok()
 
 
 @api_view(methods=("PATCH", "DELETE"))
 def committee_member(request, pk, member_pk):
     p = request.perms
-    c = _get(Committee.objects.filter(archived=False), pk)
+    c = _get(p.committees_visible(), pk)
     ms = Membership.objects.filter(committee=c, member_id=member_pk).first()
     if not ms:
         raise Http404
     if not p.can_manage_committee(c.pk):
         raise Denied()
     if request.method == "DELETE":
-        _check_core_change(p, c, ms.role)
         ms.delete()
         return ok()
-    d = request.data
-    if "role" in d:
-        role = choice(d, "role", "Role", Membership.ROLES)
-        if role != ms.role:
-            _check_core_change(p, c, Membership.HEAD)
-        ms.role = role
-    if "position" in d:
-        ms.position = text(d, "position", "Position", 60)
+    if "position" in request.data:
+        ms.position = text(request.data, "position", "Position", 60)
     ms.save()
     return ok()
-
-
-# ======================================================================= members
 
 
 def _unique_username(base):
@@ -1337,51 +1360,83 @@ def invite_message(member, code):
     )
 
 
+def member_status(m):
+    if not m.user.is_active:
+        return "inactive"
+    if m.user.has_usable_password():
+        return "active"
+    if m.invites.filter(used_at__isnull=True, expires_at__gt=timezone.now()).exists():
+        return "invited"
+    return "not_invited"
+
+
+def _level_value(p, d, current=""):
+    """Only super admins (and the developer) may set or change admin levels."""
+    if "level" not in d:
+        return current
+    level = choice(d, "level", "Level", Member.LEVELS)
+    if level != current and not p.can_set_level():
+        raise Denied("Only a super admin can make someone an admin or super admin.")
+    return level
+
+
 @api_view(methods=("GET", "POST"))
 def members(request):
     p, me = request.perms, request.member
     if request.method == "POST":
         if not p.can_manage_people():
-            raise Denied("Only admins and the core committee can add people.")
+            raise Denied("You don't have permission to add people.")
         d = request.data
         name = text(d, "name", "Name", 120, required=True)
         email, phone = _member_contact(d)
-        roles = d.get("committees") or []
-        if not isinstance(roles, list):
-            raise Bad({"committees": ["Send a list."]})
-        wanted = []
-        for r in roles:
-            try:
-                c = Committee.objects.get(pk=int(r.get("id")), archived=False)
-            except (Committee.DoesNotExist, TypeError, ValueError, AttributeError):
-                raise Bad({"committees": ["Unknown committee."]})
-            role = Membership.HEAD if r.get("role") == Membership.HEAD else Membership.MEMBER
-            _check_core_change(p, c, role)
-            wanted.append((c, role))
+        member_type = choice(d, "member_type", "Member type", Member.TYPES, Member.MEMBER)
+        wings = _wing_positions(d)
+        if not p.admin and any(c.pk not in p.wings_for(Grant.PEOPLE) for c, _ in wings):
+            raise Denied("You can only add people to your own wings.")
+        # Executives are admins by default, when the person adding them may appoint admins.
+        default_level = Member.ADMIN if (member_type == Member.EXECUTIVE and p.can_set_level()) else ""
+        level = _level_value(p, d, default_level) if "level" in d else default_level
         with transaction.atomic():
             user = User(username=_unique_username(email or f"p{phone_digits(phone)}"), email=email,
                         first_name=name[:150])
             user.set_unusable_password()
             user.save()
-            m = user.member  # created by the post_save hook in apps.py
-            m.name, m.phone, m.title = name, phone, text(d, "title", "Title", 80)
-            m.is_admin = flag(d, "is_admin") and p.admin
+            m = user.member  # created by the post_save hook
+            m.name, m.phone, m.title = name, phone, text(d, "title", "Designation", 80)
+            m.member_type, m.level = member_type, level
+            m.unit_place = text(d, "unit_place", "Unit place", 60)
+            if p.admin:
+                m.notes = text(d, "notes", "Notes", 2000)
+                m.needs_followup = flag(d, "needs_followup")
             m.save()
-            for c, role in wanted:
-                Membership.objects.create(member=m, committee=c, role=role)
-            code = Invite.issue(m, by=me)
-        return ok({"member": member_json(m), "code": code, "message": invite_message(m, code)}, 201)
+            for c, position in wings:
+                Membership.objects.create(member=m, committee=c, position=position)
+            code = Invite.issue(m, by=me) if flag(d, "invite", True) else None
+        return ok({"member": member_json(m, viewer=p), "code": code,
+                   "message": invite_message(m, code) if code else None}, 201)
 
-    qs = p.people_visible(Member.objects.filter(is_developer=False)).select_related("user").prefetch_related("memberships__committee")
+    if p.public:
+        return ok({"members": []})
+    qs = p.people_visible(Member.objects.filter(is_developer=False)).select_related("user").prefetch_related(
+        "memberships__committee", "invites")
     if not (request.GET.get("all") and p.can_manage_people()):
         qs = qs.filter(user__is_active=True)
     if request.GET.get("committee"):
         qs = qs.filter(memberships__committee_id=request.GET["committee"])
-    return ok({"members": [member_json(m) for m in qs.distinct()]})
+    return ok({"members": [member_json(m, viewer=p) for m in qs.distinct()]})
 
 
 def _people_for(perms):
     return perms.people_visible(Member.objects.select_related("user"))
+
+
+def _may_edit(p, me, m):
+    """Self, or people managers; only super admins touch admins and super admins."""
+    if m.pk == me.pk:
+        return True
+    if not p.can_manage_people():
+        return False
+    return p.super or not m.admin
 
 
 @api_view(methods=("GET", "PATCH"))
@@ -1389,16 +1444,18 @@ def member_detail(request, pk):
     p, me = request.perms, request.member
     m = _get(_people_for(p), pk)
     if request.method == "GET":
-        data = member_json(m)
+        data = member_json(m, viewer=p)
         data["open_tasks"] = [
             task_json(t)
             for t in _tasks_qs(p.tasks_visible(Task.objects.filter(assignees=m).exclude(status__in=Task.CLOSED)))[:20]
         ]
-        data["invite_pending"] = m.invites.filter(used_at__isnull=True, expires_at__gt=timezone.now()).exists()
-        data["can_manage"] = p.can_manage_people() and (p.admin or not m.admin)
+        data["responsibilities"] = [responsibility_json(r, p) for r in m.responsibilities.filter(active=True)]
+        data["can_manage"] = _may_edit(p, me, m) and m.pk != me.pk
+        data["can_set_level"] = p.can_set_level() and m.pk != me.pk
+        data["can_grant"] = p.can_manage_people() and (p.super or not m.admin) and m.pk != me.pk
         return ok({"member": data})
     is_self = m.pk == me.pk
-    if not (is_self or (p.can_manage_people() and (p.admin or not m.admin))):
+    if not _may_edit(p, me, m):
         raise Denied()
     d = request.data
     if "email" in d or "phone" in d:
@@ -1409,9 +1466,33 @@ def member_detail(request, pk):
     if "name" in d:
         m.name = text(d, "name", "Name", 120, required=True)
     if "title" in d:
-        m.title = text(d, "title", "Title", 80)
-    if "is_admin" in d and p.admin and not is_self:
-        m.is_admin = flag(d, "is_admin")
+        m.title = text(d, "title", "Designation", 80)
+    if "unit_place" in d:
+        m.unit_place = text(d, "unit_place", "Unit place", 60)
+    if not is_self or p.admin:
+        if "member_type" in d:
+            m.member_type = choice(d, "member_type", "Member type", Member.TYPES)
+        if p.admin:
+            if "notes" in d:
+                m.notes = text(d, "notes", "Notes", 2000)
+            if "needs_followup" in d:
+                m.needs_followup = flag(d, "needs_followup")
+            if "is_public" in d and not is_self:
+                m.is_public = flag(d, "is_public")  # convert a registered public user into a member
+    if "level" in d and not is_self:
+        m.level = _level_value(p, d, m.level)
+    if "committees" in d and p.can_manage_people():
+        wanted = _wing_positions(d)
+        allowed = p.wings_for(Grant.PEOPLE)
+        keep = {c.pk for c, _ in wanted}
+        with transaction.atomic():
+            for ms in m.memberships.all():
+                if ms.committee_id not in keep and ms.committee_id in allowed:
+                    ms.delete()
+            for c, position in wanted:
+                if c.pk not in allowed:
+                    raise Denied("You can only change your own wings.")
+                Membership.objects.update_or_create(member=m, committee=c, defaults={"position": position})
     if "active" in d and not is_self:
         if not p.admin:
             raise Denied("Only an admin can deactivate people.")
@@ -1422,20 +1503,46 @@ def member_detail(request, pk):
     with transaction.atomic():
         m.user.save()
         m.save()
-    return ok({"member": member_json(m)})
+    return ok({"member": member_json(m, viewer=p)})
+
+
+@api_view(methods=("PUT",))
+def member_permissions(request, pk):
+    """Replace someone's individual permissions: {"permissions": [{"perm": "tasks", "all_wings": false}, …]}."""
+    p, me = request.perms, request.member
+    m = _get(_people_for(p), pk)
+    if m.pk == me.pk or not p.can_manage_people() or (m.admin and not p.super):
+        raise Denied()
+    rows = request.data.get("permissions")
+    if not isinstance(rows, list):
+        raise Bad({"permissions": ["Send a list."]})
+    valid = dict(Grant.PERMS)
+    wanted = {}
+    for r in rows:
+        perm = (r or {}).get("perm")
+        if perm not in valid:
+            raise Bad({"permissions": ["Unknown permission."]})
+        all_wings = bool(r.get("all_wings"))
+        if not p.has(perm) or (all_wings and not p.all_wings(perm)):
+            raise Denied("You can only give permissions you have yourself.")
+        wanted[perm] = all_wings
+    with transaction.atomic():
+        Grant.objects.filter(member=m).exclude(perm__in=wanted).delete()
+        for perm, all_wings in wanted.items():
+            Grant.objects.update_or_create(member=m, perm=perm, defaults={"all_wings": all_wings})
+    return ok({"member": member_json(m, viewer=p)})
 
 
 @api_view(methods=("POST",))
 def member_invite(request, pk):
     p, me = request.perms, request.member
     m = _get(_people_for(p), pk)
-    if not p.can_manage_people() or (m.admin and not p.admin):
+    if not (p.can_manage_people() or p.has(Grant.RESETS)) or (m.admin and not p.super):
         raise Denied()
+    if not (m.phone or m.user.email):
+        raise Bad({"phone": ["Add a phone number or email first, so they can sign in."]})
     code = Invite.issue(m, by=me)
     return ok({"code": code, "message": invite_message(m, code)})
-
-
-# ======================================================================= inbox
 
 
 @api_view()
@@ -1454,3 +1561,155 @@ def notifications_read(request):
         qs = qs.filter(pk__in=ids)
     qs.update(read_at=timezone.now())
     return ok({"counts": _counts(me)})
+
+
+# ======================================================================= responsibilities
+
+
+def responsibility_status(r, today=None):
+    today = today or timezone.localdate()
+    window = today - timedelta(days=30)
+    done = set(r.done.filter(due_date__gte=window).values_list("due_date", flat=True))
+    past = list(r.occurrences(window, today))
+    pending = [d for d in past if d not in done]
+    current = pending[-1] if pending else None
+    upcoming = next(r.occurrences(today + timedelta(days=1), today + timedelta(days=400)), None)
+    return {
+        "due": _iso(current),
+        "due_today": current == today,
+        "next": _iso(upcoming),
+        "missed": len([d for d in pending if d != current]),
+        "last_done": _iso(max(done)) if done else None,
+    }
+
+
+def responsibility_json(r, perms, history=False):
+    data = {
+        "id": r.pk,
+        "title": r.title,
+        "description": r.description,
+        "committee": committee_brief(r.committee),
+        "holder": member_brief(r.holder),
+        "repeat": r.repeat,
+        "repeat_label": r.get_repeat_display(),
+        "weekday": r.weekday,
+        "monthday": r.monthday,
+        "start_date": _iso(r.start_date),
+        "remind": r.remind,
+        "active": r.active,
+        "is_mine": r.holder_id == perms.member.pk,
+        "can_manage": perms.can_manage_responsibility(r),
+        **responsibility_status(r),
+    }
+    if history:
+        data["history"] = [
+            {"date": _iso(x.due_date), "by": member_brief(x.done_by), "at": _iso(x.done_at), "note": x.note}
+            for x in r.done.select_related("done_by__user")[:30]
+        ]
+    return data
+
+
+def _responsibility_fields(r, d, perms, manager):
+    if manager:
+        if "title" in d or not r.pk:
+            r.title = text(d, "title", "Title", 200, required=True)
+        if "description" in d:
+            r.description = text(d, "description", "Description", 3000)
+        if "committee" in d or not r.pk:
+            cid = d.get("committee")
+            if cid:
+                c = _get(perms.committees_visible(), int(cid))
+                if c.pk not in perms.wings_for(Grant.RESPONSIBILITIES):
+                    raise Denied("You don't have responsibilities permission for this wing.")
+                r.committee = c
+            elif not perms.all_wings(Grant.RESPONSIBILITIES):
+                raise Bad({"committee": ["Choose a wing."]})
+            else:
+                r.committee = None
+        if "holder" in d or not r.pk:
+            try:
+                holder = _get(perms.people_visible(Member.objects.filter(user__is_active=True)), int(d.get("holder") or 0))
+            except (TypeError, ValueError):
+                raise Bad({"holder": ["Choose who holds this responsibility."]})
+            if not perms.all_wings(Grant.RESPONSIBILITIES) and r.committee_id and \
+                    not Membership.objects.filter(member=holder, committee_id=r.committee_id).exists():
+                raise Bad({"holder": ["Choose someone in this wing."]})
+            r.holder = holder
+        if "active" in d:
+            r.active = flag(d, "active")
+    # the holder (and managers) decide how often it repeats and when to be reminded
+    if "repeat" in d:
+        r.repeat = choice(d, "repeat", "Repeat", Responsibility.REPEATS)
+    if "weekday" in d:
+        v = d.get("weekday")
+        r.weekday = None if v in (None, "") else max(0, min(6, int(v)))
+    if "monthday" in d:
+        v = d.get("monthday")
+        r.monthday = None if v in (None, "") else max(1, min(31, int(v)))
+    if "start_date" in d and d.get("start_date"):
+        r.start_date = date_value(d, "start_date", "Start date")
+    if "remind" in d:
+        r.remind = choice(d, "remind", "Reminder", Responsibility.REMINDS)
+
+
+@api_view(methods=("GET", "POST"))
+def responsibilities(request):
+    p, me = request.perms, request.member
+    if request.method == "POST":
+        if not p.can_lead(Grant.RESPONSIBILITIES):
+            raise Denied("You don't have permission to give responsibilities.")
+        r = Responsibility(created_by=me)
+        _responsibility_fields(r, request.data, p, manager=True)
+        r.save()
+        if r.holder_id != me.pk:
+            notify([r.holder], "responsibility", r.pk, f"New responsibility: {r.title}",
+                   "Set how often it repeats and your reminder in the app.")
+        return ok({"responsibility": responsibility_json(r, p)}, 201)
+    qs = p.responsibilities_visible(Responsibility.objects.filter(active=True)).select_related(
+        "committee", "holder__user")
+    scope = request.GET.get("scope", "mine")
+    if scope == "mine":
+        qs = qs.filter(holder=me)
+    if request.GET.get("committee"):
+        qs = qs.filter(committee_id=request.GET["committee"])
+    return ok({"responsibilities": [responsibility_json(r, p) for r in qs]})
+
+
+@api_view(methods=("GET", "PATCH", "DELETE"))
+def responsibility_detail(request, pk):
+    p, me = request.perms, request.member
+    r = _get(p.responsibilities_visible().select_related("committee", "holder__user"), pk)
+    if request.method == "GET":
+        return ok({"responsibility": responsibility_json(r, p, history=True)})
+    manager = p.can_manage_responsibility(r)
+    if not (manager or r.holder_id == me.pk):
+        raise Denied()
+    if request.method == "DELETE":
+        if not manager:
+            raise Denied()
+        r.delete()
+        return ok()
+    _responsibility_fields(r, request.data, p, manager=manager)
+    r.save()
+    return ok({"responsibility": responsibility_json(r, p, history=True)})
+
+
+@api_view(methods=("POST", "DELETE"))
+def responsibility_done(request, pk):
+    from .models import ResponsibilityDone
+
+    p, me = request.perms, request.member
+    r = _get(p.responsibilities_visible(), pk)
+    if not (r.holder_id == me.pk or p.can_manage_responsibility(r)):
+        raise Denied()
+    d = request.data if request.method == "POST" else request.GET
+    when = date_value(d, "date", "Date") or (
+        date.fromisoformat(responsibility_status(r)["due"]) if responsibility_status(r)["due"] else None)
+    if when is None or not r.occurs_on(when) or when > timezone.localdate():
+        raise Bad({"date": ["Nothing is due on that day."]})
+    if request.method == "DELETE":
+        ResponsibilityDone.objects.filter(responsibility=r, due_date=when).delete()
+    else:
+        ResponsibilityDone.objects.update_or_create(
+            responsibility=r, due_date=when, defaults={"done_by": me, "note": text(d, "note", "Note", 500)})
+    return ok({"responsibility": responsibility_json(r, p, history=True)})

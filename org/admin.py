@@ -11,6 +11,13 @@ from .models import (
     Member,
     Membership,
     Notification,
+    Grant,
+    Program,
+    ProgramResource,
+    PublicPost,
+    PasswordResetRequest,
+    Responsibility,
+    ResponsibilityDone,
     Receipt,
     Task,
     TaskUpdate,
@@ -25,9 +32,9 @@ class MembershipInline(admin.TabularInline):
 
 @admin.register(Member)
 class MemberAdmin(admin.ModelAdmin):
-    list_display = ["name", "phone", "title", "is_admin", "active"]
+    list_display = ["name", "phone", "title", "member_type", "level", "unit_place", "active"]
     search_fields = ["name", "phone", "user__email"]
-    list_filter = ["is_admin", "memberships__committee"]
+    list_filter = ["member_type", "level", "is_public", "needs_followup", "memberships__committee"]
     raw_id_fields = ["user"]
 
     @admin.display(boolean=True)
@@ -89,3 +96,5 @@ class ApiTokenAdmin(admin.ModelAdmin):
 
 
 admin.site.register([Receipt, Notification, Device])
+
+admin.site.register([Grant, Program, ProgramResource, PublicPost, PasswordResetRequest, Responsibility, ResponsibilityDone])

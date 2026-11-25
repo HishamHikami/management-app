@@ -24,13 +24,27 @@ from .models import (
 PW = "a-good-pass-123"
 
 
+LEAD = ("tasks", "responsibilities", "announcements", "meetings")
+
+
 def make_member(name, email, committees=(), admin=False, phone=""):
+    """`head` gets the leading permissions for that wing (plus managing its people); members of the
+    core wing get the leading permissions for all wings: the same mapping as migration 0004."""
+    from .models import Grant
+
     u = User.objects.create_user(username=email, email=email, password=PW, first_name=name)
     m = u.member
-    m.name, m.is_admin, m.phone = name, admin, phone
+    m.name, m.phone = name, phone
+    m.level = "super" if admin else ""
     m.save()
     for c, role in committees:
-        Membership.objects.create(member=m, committee=c, role=role)
+        Membership.objects.create(member=m, committee=c, position="Chairman" if role == "head" else "")
+        if role == "head" and not c.is_core:
+            for perm in LEAD + ("people",):
+                Grant.objects.get_or_create(member=m, perm=perm)
+        if c.is_core:
+            for perm in LEAD:
+                Grant.objects.update_or_create(member=m, perm=perm, defaults={"all_wings": True})
     return m
 
 
@@ -136,7 +150,9 @@ class AuthTests(Base):
         self.assertFalse(me["is_core"])
         self.assertEqual(me["headed_ids"], [self.edu.pk])
         self.as_(self.corem)
-        self.assertTrue(self.get("bootstrap").json()["me"]["is_core"])
+        me = self.get("bootstrap").json()["me"]
+        self.assertFalse(me["is_core"])  # core-committee powers are now permissions for all wings
+        self.assertEqual(me["permissions"]["tasks"], "all")
 
 
 class TaskTests(Base):
@@ -359,7 +375,7 @@ class PushConfigTests(Base):
         out = StringIO()
         call_command("setup_org", name="First Admin", email="first@x.org", stdout=out)
         self.assertTrue(Committee.objects.filter(is_core=True).exists())
-        self.assertTrue(Member.objects.get(user__email="first@x.org").is_admin)
+        self.assertTrue(Member.objects.get(user__email="first@x.org").super)
         self.assertTrue(Invite.objects.filter(member__user__email="first@x.org").exists())
 
 
@@ -462,3 +478,161 @@ class DeleteAccountTests(Base):
     def test_pages(self):
         self.assertContains(self.client.get("/privacy"), "Privacy policy")
         self.assertContains(self.client.get("/account-deletion"), "Delete my account")
+
+
+class LevelsAndPermissionsTests(Base):
+    def test_only_super_appoints_admins(self):
+        self.admin.level = "admin"
+        self.admin.save()
+        self.as_(self.admin)
+        r = self.post("members", {"name": "Exec", "phone": "0551230001", "member_type": "executive"})
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(r.json()["member"]["level"], "")  # admins can't appoint admins
+        self.assertEqual(self.patch(f"members/{self.mem.pk}", {"level": "admin"}).status_code, 403)
+        sup = make_member("Sup", "sup@x.org", admin=True)
+        self.as_(sup)
+        r = self.post("members", {"name": "Exec2", "phone": "0551230002", "member_type": "executive"})
+        self.assertEqual(r.json()["member"]["level"], "admin")  # executives are admins by default
+        self.assertEqual(self.patch(f"members/{self.mem.pk}", {"level": "super"}).status_code, 200)
+
+    def test_grants_scope(self):
+        sup = make_member("Sup", "sup@x.org", admin=True)
+        self.as_(sup)
+        r = self.call("put", f"members/{self.other.pk}/permissions",
+                      {"permissions": [{"perm": "tasks"}, {"perm": "public", "all_wings": True}]})
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(r.json()["member"]["permissions"], {"tasks": "own", "public": "all"})
+        self.as_(self.other)
+        self.assertEqual(self.post("tasks", {"title": "x", "committee": self.fin.pk}).status_code, 201)
+        self.assertEqual(self.post("tasks", {"title": "x", "committee": self.edu.pk}).status_code, 403)
+        self.assertEqual(self.post("public/posts", {"kind": "news", "title": "Hi"}).status_code, 201)
+        # members can't hand out permissions
+        self.assertEqual(self.call("put", f"members/{self.mem.pk}/permissions",
+                                   {"permissions": [{"perm": "tasks"}]}).status_code, 403)
+
+    def test_people_status_and_notes_privacy(self):
+        self.as_(self.admin)
+        r = self.post("members", {"name": "New", "phone": "0551230009", "invite": False, "notes": "follow up"})
+        mid = r.json()["member"]["id"]
+        self.assertEqual(r.json()["member"]["status"], "not_invited")
+        self.assertEqual(self.post(f"members/{mid}/invite").status_code, 200)
+        self.assertEqual(self.get(f"members/{mid}").json()["member"]["status"], "invited")
+        self.as_(self.mem)
+        self.assertNotIn("notes", self.get(f"members/{mid}").json()["member"])
+
+
+class ResponsibilityTests(Base):
+    def test_holder_sets_repeat_and_checks_off(self):
+        self.as_(self.head)
+        r = self.post("responsibilities", {"title": "Open the hall", "committee": self.edu.pk, "holder": self.mem.pk})
+        self.assertEqual(r.status_code, 201, r.content)
+        rid = r.json()["responsibility"]["id"]
+        self.as_(self.mem)
+        today = timezone.localdate()
+        r = self.patch(f"responsibilities/{rid}", {"repeat": "daily", "start_date": str(today), "remind": "day_before"})
+        self.assertEqual(r.json()["responsibility"]["due"], str(today))
+        self.assertEqual(self.patch(f"responsibilities/{rid}", {"title": "x"}).json()["responsibility"]["title"],
+                         "Open the hall")  # holders can't rename it
+        r = self.post(f"responsibilities/{rid}/done", {"note": "done"})
+        self.assertIsNone(r.json()["responsibility"]["due"])
+        self.assertEqual(len(self.get("responsibilities").json()["responsibilities"]), 1)
+        self.as_(self.other)
+        self.assertEqual(self.get(f"responsibilities/{rid}").status_code, 404)
+
+    def test_members_cannot_create(self):
+        self.as_(self.mem)
+        r = self.post("responsibilities", {"title": "x", "committee": self.edu.pk, "holder": self.mem.pk})
+        self.assertEqual(r.status_code, 403)
+
+
+class PublicTests(Base):
+    def test_public_reading_and_whoswho_has_no_contacts(self):
+        self.assertEqual(self.client.get("/api/v1/public/home").status_code, 200)
+        w = self.client.get("/api/v1/public/whoswho").json()
+        text = json.dumps(w)
+        self.assertNotIn("0501112222", text)
+        self.assertNotIn("@x.org", text)
+        self.assertTrue(any(p["name"] == "Edu Head" for wing in w["wings"] for p in wing["people"]))
+
+    def test_publishing_needs_permission(self):
+        r = self.client.post("/api/v1/public/posts", json.dumps({"title": "x"}), content_type="application/json")
+        self.assertEqual(r.status_code, 403)
+        self.as_(self.admin)
+        r = self.post("public/posts", {"kind": "live", "title": "Friday class", "link": "https://youtu.be/x", "notify": True})
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertTrue(r.json()["post"]["is_live"])
+        r = self.post("public/programs", {"name": "QHLS", "registration_url": "https://forms.gle/abc"})
+        pid = r.json()["program"]["id"]
+        self.post(f"public/programs/{pid}/resources", {"title": "Week 1 notes", "url": "https://drive.google.com/x"})
+        p = self.client.get(f"/api/v1/public/programs/{pid}").json()["program"]
+        self.assertEqual(len(p["resources"]), 1)
+        self.assertEqual(len(self.client.get("/api/v1/public/home").json()["live"]), 1)
+
+    def test_register_login_and_kept_apart(self):
+        r = self.client.post("/api/v1/public/register", json.dumps(
+            {"name": "Visitor", "phone": "0559990001", "password": PW}), content_type="application/json")
+        self.assertEqual(r.status_code, 201, r.content)
+        tok = r.json()["token"]
+        me = self.call("get", "bootstrap", token=tok).json()["me"]
+        self.assertTrue(me["is_public"])
+        self.assertEqual(self.call("get", "members", token=tok).json()["members"], [])
+        self.as_(self.admin)
+        self.assertFalse(any(m["name"] == "Visitor" for m in self.get("members?all=1").json()["members"]))
+        # a member's number can't be used to register publicly
+        r = self.client.post("/api/v1/public/register", json.dumps(
+            {"name": "X", "phone": "0501112222", "password": PW}), content_type="application/json")
+        self.assertEqual(r.status_code, 400)
+
+    def test_password_reset_flow(self):
+        from .models import Grant
+
+        Grant.objects.create(member=self.head, perm="password_resets")
+        r = self.client.post("/api/v1/public/password-reset", json.dumps({"phone": "+966 50 111 2222"}),
+                             content_type="application/json")
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(Notification.objects.filter(member=self.head, kind="reset").exists())
+        self.as_(self.head)
+        reqs = self.get("resets").json()["requests"]
+        self.assertEqual(reqs[0]["member"]["name"], "Admin")
+        # only super admins may reset an admin
+        self.assertEqual(self.post(f"resets/{reqs[0]['id']}/handle").status_code, 403)
+        self.as_(self.mem)
+        self.assertEqual(self.get("resets").status_code, 403)
+
+
+class ImportTests(TestCase):
+    def test_import_from_sheet(self):
+        import tempfile
+        from io import StringIO
+
+        import openpyxl
+        from django.core.management import call_command
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Members"
+        ws.append(["DIRECTORY"])
+        ws.append([])
+        ws.append(["Sl. No.", "Name\nx", "Mobile No.\nx", "Unit Place", "Member Type", "Wing", "Position 1",
+                   "Position 2", "Comments"])
+        ws.append([1, "Test One", "0500000001", "MALAZ AREA", "EXECUTIVE", "QHLS", "PRESIDENT", "", ""])
+        ws.append([2, "Test Two", "0500000002", "BATHA GURABI", "MEMBER", "ORG,EDUCATION", "Convenor", "Member", "form"])
+        ws.append([3, "Test Three", "", "", "MEMBER", "EXIT", "", "", ""])
+        ws.append([4, "Test Four", "", "ISKAAN", "MEMBER", "", "", "", ""])
+        with tempfile.NamedTemporaryFile(suffix=".xlsx") as f:
+            wb.save(f.name)
+            out = StringIO()
+            call_command("import_members", f.name, "--dry-run", stdout=out)
+            self.assertFalse(Member.objects.filter(name="Test One").exists())
+            call_command("import_members", f.name, stdout=out)
+        one = Member.objects.get(name="Test One")
+        self.assertEqual((one.title, one.member_type, one.unit_place, one.level), ("President", "executive", "Malaz Area", ""))
+        self.assertFalse(one.user.has_usable_password())
+        two = Member.objects.get(name="Test Two")
+        self.assertEqual({(ms.committee.name, ms.position) for ms in two.memberships.all()},
+                         {("ORG", "Convenor"), ("Education", "Member")})
+        self.assertTrue(two.needs_followup)
+        self.assertFalse(Member.objects.filter(name="Test Three").exists())
+        self.assertTrue(Member.objects.filter(name="Test Four", phone="").exists())
+        self.assertNotIn("Test One", out.getvalue())
+        self.assertNotIn("0500000001", out.getvalue())

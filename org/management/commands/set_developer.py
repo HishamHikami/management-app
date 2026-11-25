@@ -35,7 +35,7 @@ class Command(BaseCommand):
     def handle(self, *args, **o):
         if o["list"]:
             for m in Member.objects.select_related("user").order_by("pk"):
-                flags = [f for f, on in (("developer", m.is_developer), ("admin", m.is_admin),
+                flags = [f for f, on in (("developer", m.is_developer), ("admin", m.is_admin), ("super", m.level == "super"),
                                          ("inactive", not m.user.is_active)) if on]
                 self.stdout.write(f"#{m.pk}  {m.name}  {m.user.email or '-'}  {m.phone or '-'}  {' '.join(flags)}")
             return
@@ -47,10 +47,9 @@ class Command(BaseCommand):
         if o["undo"]:
             m.is_developer = False
             m.save()
-            self.stdout.write(self.style.SUCCESS(f"{m.name} is a normal account again (admin: {m.is_admin})."))
+            self.stdout.write(self.style.SUCCESS(f"{m.name} is a normal account again (level: {m.level or "member"})."))
             return
         m.is_developer = True
-        m.is_admin = True
         m.save()
         left = 0
         if not o["keep_committees"]:

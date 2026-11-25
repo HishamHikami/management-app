@@ -35,7 +35,7 @@ class Command(BaseCommand):
         member, _ = Member.objects.get_or_create(user=user, defaults={"name": o["name"]})
         member.name = o["name"]
         member.phone = o["phone"] or member.phone
-        member.is_admin = True
+        member.level = "super"
         member.save()
         Membership.objects.update_or_create(member=member, committee=core, defaults={"role": Membership.HEAD})
         code = Invite.issue(member)

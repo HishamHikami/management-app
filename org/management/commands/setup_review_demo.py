@@ -15,7 +15,7 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.utils import timezone
 
-from org.models import Announcement, Attendee, Committee, Meeting, Membership, Receipt, Task, TaskUpdate
+from org.models import Announcement, Attendee, Committee, Grant, Meeting, Membership, Receipt, Task, TaskUpdate
 
 LOGIN = "review@ksa-riyadh.halacreative.com"
 PEOPLE = [("Ahmed (demo)", "Secretary"), ("Bilal (demo)", ""), ("Zakir (demo)", ""), ("Imran (demo)", "")]
@@ -60,7 +60,9 @@ class Command(BaseCommand):
 
         pw = _password()
         reviewer = person("App Reviewer", "Committee head", LOGIN, pw)
-        Membership.objects.create(member=reviewer, committee=c, role=Membership.HEAD)
+        Membership.objects.create(member=reviewer, committee=c, position="Chairman")
+        for perm in (Grant.TASKS, Grant.RESPONSIBILITIES, Grant.ANNOUNCEMENTS, Grant.MEETINGS, Grant.PEOPLE):
+            Grant.objects.create(member=reviewer, perm=perm)
         others = [person(n, t) for n, t in PEOPLE]
         for m in others:
             Membership.objects.create(member=m, committee=c)

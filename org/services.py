@@ -1,12 +1,13 @@
 """Who may do what, and who hears about it.
 
-Roles:
-- **Admin** (Member.is_admin or Django superuser): adds people and committees, changes roles.
-- **Core committee** (member of the committee marked is_core): sees everything, assigns tasks to
-  any committee or person, posts announcements to anyone, calls general or committee meetings.
-- **Committee head**: the same powers inside the committees they head.
-- **Member**: sees their committees' work, updates and comments on tasks, replies to meetings,
-  reads and acknowledges announcements.
+Levels:
+- **Developer** (hidden owner account) and **Super admin**: everything, including appointing
+  admins and super admins.
+- **Admin**: everything except appointing or changing admins / super admins.
+- **Member**: sees their wings' work, updates tasks, ticks off responsibilities, replies to
+  meetings, reads announcements, plus any individual **permissions** (Grant) an admin gave them,
+  each for their own wings or for all wings.
+Positions (Chairman, Convenor, …) and member type (Executive / Member) are labels only.
 """
 
 from django.db import transaction
@@ -17,6 +18,7 @@ from .models import (
     Announcement,
     Attendee,
     Committee,
+    Grant,
     Meeting,
     Member,
     Membership,
@@ -33,55 +35,93 @@ class Perms:
 
     def __init__(self, member):
         self.member = member
-        rows = list(
-            Membership.objects.filter(member=member, committee__archived=False).values_list(
-                "committee_id", "role", "committee__is_core"
-            )
+        self.committee_ids = set(
+            Membership.objects.filter(member=member, committee__archived=False).values_list("committee_id", flat=True)
         )
-        self.committee_ids = {c for c, _, _ in rows}
-        self.headed_ids = {c for c, r, _ in rows if r == Membership.HEAD}
+        self.grants = dict(Grant.objects.filter(member=member).values_list("perm", "all_wings"))
         self.demo = member.is_demo
-        self.admin = member.admin and not self.demo
-        self.core = not self.demo and (self.admin or any(core for _, _, core in rows))
+        self.public = member.is_public
+        self.super = member.super and not self.demo and not self.public
+        self.admin = member.admin and not self.demo and not self.public
+        self.core = self.admin  # sees and may do everything with the members' content
 
-    # people & committees
+    def _all_wing_ids(self):
+        return set(Committee.objects.filter(archived=False, is_demo=self.demo).values_list("pk", flat=True))
+
+    def has(self, perm):
+        return self.admin or perm in self.grants
+
+    def all_wings(self, perm):
+        return self.admin or self.grants.get(perm) is True
+
+    def wings_for(self, perm):
+        """Wing ids where this person may use a permission."""
+        if self.all_wings(perm):
+            return self._all_wing_ids()
+        if perm in self.grants:
+            return set(self.committee_ids)
+        return set()
+
+    @property
+    def headed_ids(self):
+        """Wings where this person can lead (create work) at all."""
+        ids = set()
+        for p in (Grant.TASKS, Grant.ANNOUNCEMENTS, Grant.MEETINGS, Grant.RESPONSIBILITIES):
+            ids |= self.wings_for(p)
+        return ids
+
+    def permissions(self):
+        """{perm: "all" | "own"} for the app."""
+        if self.admin:
+            return {p: "all" for p, _ in Grant.PERMS}
+        return {p: ("all" if a else "own") for p, a in self.grants.items()}
+
+    # people & wings
     def can_manage_people(self):
-        return self.admin or self.core
+        return self.has(Grant.PEOPLE)
 
     def can_manage_committee(self, committee_id):
-        return self.core or committee_id in self.headed_ids
+        return committee_id in self.wings_for(Grant.PEOPLE)
 
-    def can_lead(self):
-        """Can create tasks / announcements / meetings at all."""
-        return self.core or bool(self.headed_ids)
+    def can_set_level(self, target=None):
+        """Only super admins (and the developer) appoint or change admins and super admins."""
+        return self.super
 
-    def leadable_committee_ids(self):
-        if self.core:
-            return set(Committee.objects.filter(archived=False, is_demo=False).values_list("pk", flat=True))
-        return set(self.headed_ids)
+    def can_lead(self, perm=None):
+        if perm:
+            return bool(self.wings_for(perm)) or (perm == Grant.PUBLIC and self.has(perm))
+        return bool(self.headed_ids)
+
+    def leadable_committee_ids(self, perm=None):
+        return self.wings_for(perm) if perm else self.headed_ids
 
     def committees_visible(self, qs=None):
         qs = Committee.objects.filter(archived=False) if qs is None else qs
+        if self.public:
+            return qs.none()  # public users see wings only through the public Who's who
         return qs.filter(is_demo=self.demo)
 
     def people_visible(self, qs=None):
-        """Developers are seen only by themselves; demo accounts and real members never see each other."""
+        """Developers are seen only by themselves; demo accounts, public users and members are kept apart."""
         qs = Member.objects.all() if qs is None else qs
-        qs = qs.filter(is_demo=self.demo)
+        if self.public:
+            return qs.filter(pk=self.member.pk)  # only themselves
+        qs = qs.filter(is_demo=self.demo, is_public=False)
         return qs if self.member.is_developer else qs.filter(is_developer=False)
 
     # tasks
     def tasks_visible(self, qs=None):
         qs = Task.objects.all() if qs is None else qs
-        if self.core:
-            return qs
+        if self.all_wings(Grant.TASKS):
+            return qs.filter(committee__is_demo=self.demo)
         return qs.filter(
-            Q(committee_id__in=self.committee_ids) | Q(assignees=self.member) | Q(created_by=self.member)
+            Q(committee_id__in=self.committee_ids | self.wings_for(Grant.TASKS))
+            | Q(assignees=self.member) | Q(created_by=self.member)
         ).distinct()
 
     def can_manage_task(self, task):
         """Edit, reassign, delete."""
-        return self.core or task.created_by_id == self.member.pk or task.committee_id in self.headed_ids
+        return task.created_by_id == self.member.pk or task.committee_id in self.wings_for(Grant.TASKS)
 
     def can_work_on_task(self, task):
         """Change status, comment."""
@@ -94,29 +134,47 @@ class Perms:
     # announcements
     def announcements_visible(self, qs=None):
         qs = Announcement.objects.all() if qs is None else qs
-        if self.core:
+        if self.admin:
             return qs
         return qs.filter(Q(receipts__member=self.member) | Q(author=self.member)).distinct()
 
     def can_manage_announcement(self, a):
-        return self.core or a.author_id == self.member.pk
+        return self.admin or a.author_id == self.member.pk
 
     # meetings
     def meetings_visible(self, qs=None):
         qs = Meeting.objects.all() if qs is None else qs
-        if self.core:
+        if self.admin:
             return qs
         return qs.filter(
-            Q(attendees__member=self.member) | Q(created_by=self.member) | Q(committee_id__in=self.headed_ids)
+            Q(attendees__member=self.member) | Q(created_by=self.member)
+            | Q(committee_id__in=self.wings_for(Grant.MEETINGS))
         ).distinct()
 
     def can_manage_meeting(self, m):
-        return self.core or m.created_by_id == self.member.pk or (m.committee_id in self.headed_ids)
+        return self.admin or m.created_by_id == self.member.pk or m.committee_id in self.wings_for(Grant.MEETINGS)
+
+    # responsibilities
+    def responsibilities_visible(self, qs=None):
+        from .models import Responsibility
+
+        qs = Responsibility.objects.all() if qs is None else qs
+        if self.all_wings(Grant.RESPONSIBILITIES):
+            return qs.filter(holder__is_demo=self.demo)
+        return qs.filter(
+            Q(holder=self.member) | Q(committee_id__in=self.committee_ids | self.wings_for(Grant.RESPONSIBILITIES))
+            | Q(created_by=self.member)
+        ).distinct()
+
+    def can_manage_responsibility(self, r):
+        return (r.created_by_id == self.member.pk
+                or (r.committee_id in self.wings_for(Grant.RESPONSIBILITIES))
+                or self.all_wings(Grant.RESPONSIBILITIES))
 
 
 def active_members():
-    """Real members: active, and not the hidden developer account."""
-    return Member.objects.filter(user__is_active=True, is_developer=False, is_demo=False)
+    """Real members: active, not the hidden developer account, not demo or public users."""
+    return Member.objects.filter(user__is_active=True, is_developer=False, is_demo=False, is_public=False)
 
 
 # ----------------------------------------------------------------------- audiences
@@ -169,12 +227,10 @@ def invite_to_meeting(m, actor, notify_title=None):
 
 
 def task_watchers(task, exclude=None):
-    """Assignees and creator; if nobody is assigned, the committee's heads."""
+    """Assignees and creator; if nobody is assigned, the whole wing."""
     people = set(task.assignees.filter(user__is_active=True))
     if not people:
-        people = set(
-            active_members().filter(memberships__committee=task.committee, memberships__role=Membership.HEAD)
-        )
+        people = set(active_members().filter(memberships__committee=task.committee))
     if task.created_by_id and task.created_by.active:
         people.add(task.created_by)
     if exclude is not None:
@@ -199,7 +255,7 @@ def _snippet(text, n=140):
     return text if len(text) <= n else text[: n - 1] + "…"
 
 
-def notify(members, kind, object_id, title, body="", urgent=False):
+def notify(members, kind, object_id, title, body="", urgent=False, push_each=True):
     members = [m for m in members if m is not None]
     if not members:
         return
@@ -207,6 +263,8 @@ def notify(members, kind, object_id, title, body="", urgent=False):
         [Notification(member=m, kind=kind, object_id=object_id, title=title[:200], body=_snippet(body, 300))
          for m in members]
     )
+    if not push_each:
+        return
     from . import push
 
     ids = [m.pk for m in members]

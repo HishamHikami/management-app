@@ -10,5 +10,5 @@ def ensure_member(sender, instance, created, **kwargs):
         Member.objects.create(
             user=instance,
             name=instance.get_full_name() or instance.first_name or instance.username,
-            is_admin=instance.is_superuser,
+            level="super" if instance.is_superuser else "",
         )

@@ -1,6 +1,6 @@
 from django.urls import path
 
-from . import api
+from . import api, api_public
 
 urlpatterns = [
     path("config", api.config),
@@ -36,6 +36,23 @@ urlpatterns = [
     path("members", api.members),
     path("members/<int:pk>", api.member_detail),
     path("members/<int:pk>/invite", api.member_invite),
+    path("members/<int:pk>/permissions", api.member_permissions),
+    path("responsibilities", api.responsibilities),
+    path("responsibilities/<int:pk>", api.responsibility_detail),
+    path("responsibilities/<int:pk>/done", api.responsibility_done),
+    path("resets", api_public.resets),
+    path("resets/<int:pk>/handle", api_public.reset_handle),
+    # public side (no sign-in needed to read)
+    path("public/home", api_public.home),
+    path("public/posts", api_public.posts),
+    path("public/posts/<int:pk>", api_public.post_detail),
+    path("public/programs", api_public.programs),
+    path("public/programs/<int:pk>", api_public.program_detail),
+    path("public/programs/<int:pk>/resources", api_public.program_resources),
+    path("public/programs/<int:pk>/resources/<int:rid>", api_public.program_resource),
+    path("public/whoswho", api_public.whoswho),
+    path("public/register", api_public.register),
+    path("public/password-reset", api_public.password_reset_request),
     path("notifications", api.notifications),
     path("notifications/read", api.notifications_read),
 ]
