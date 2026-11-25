@@ -31,3 +31,18 @@ Also pending for the next iOS workflow change:
    Store impact: with a public area the app is no longer members-only, so the plan for Apple's
    *unlisted* distribution changes to a normal public listing (simpler), and both store listings,
    screenshots and privacy texts get updated.
+
+3. **Public accounts and the opening screen** (decided by the owner):
+   - Anyone can **register** (optional) to stay connected: receive public announcements and updates.
+     Registering is optional; the public area works without it.
+   - **Notifications:** no separate opt-in; if the person allows notifications on their phone, that is enough.
+   - **Members' invitation login stays exactly as it is**, but it is **not shown prominently**:
+     the app opens on the public home (events, live, videos, QHLS), and the members' sign-in /
+     invite code sits in a small, discreet place (e.g. a "Members" link in the menu or profile corner),
+     so the public never feels the app is only for a select few.
+   Open questions:
+   - What does public registration ask for: name + phone and/or email? Password, or a one-time code (OTP)?
+   - Is a registered public user stored separately from members (recommended), so they never appear in
+     the members' directory, tasks or committees?
+   - Can the core committee later "promote" a registered public user to a member?
+   - Should public users see who else is registered? (Assumed: no.)
