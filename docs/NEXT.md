@@ -46,3 +46,23 @@ Also pending for the next iOS workflow change:
      the members' directory, tasks or committees?
    - Can the core committee later "promote" a registered public user to a member?
    - Should public users see who else is registered? (Assumed: no.)
+
+4. **Public "Who's who"**: visible to everyone (public and members):
+   - Every wing/committee, its people and each person's **designation** (e.g. President, Secretary,
+     Head of Education), so anyone knows who is responsible for what and can contact them.
+   Open questions:
+   - "Wing" = the committees in the app (Education, Welfare, …), or are wings a level above committees?
+   - Contact details shown to the public: phone / WhatsApp / email for everyone, or only for heads and
+     office-bearers, or per person (a "show my number publicly" switch)? (Privacy policy gets updated.)
+   - Photos of office-bearers: yes/no?
+
+5. **First-time import from the owner's Excel sheet** (run on the server by the droplet session):
+   - Create **every person** from the sheet as a member record, with their wing/committee, role
+     (head/member), designation, phone/email, and the **responsibilities** they already hold.
+   - Nobody can log in yet: no password, no invite code sent automatically.
+   - A **People** section lists everyone with their status (*Not invited* / *Invite sent* / *Active*)
+     and a **Send invite code** button (WhatsApp/copy, as today). Only after they use the code do
+     they become a registered (active) user.
+   - Plain members (no committee role) are imported too and appear in People.
+   Needed from the owner: the Excel sheet itself, or at least its column headings and 2–3 sample rows,
+   so the importer matches it (it can be uploaded in the droplet session; personal data stays on the server).
