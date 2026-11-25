@@ -99,3 +99,28 @@ Also pending for the next iOS workflow change:
      designations; status *Not invited* until someone sends their invite code.
    Open question: after the import, should the 18 Executives become admins **straight away** (default
    rule applies), or stay without admin until the owner confirms each one?
+
+## Answers (owner, 25 Nov 2026)
+- **Responsibilities:** the person who holds a responsibility sets how often it repeats and their own
+  reminders (fully up to them).
+- **Public content:** anyone an admin has given the *publish public content* permission can post
+  (not only admins).
+- **Public registration:** phone number + password, no OTP. **Forgot password →** a "Request password
+  reset" button on the sign-in page; it goes to everyone holding a new permission
+  **"Handle password resets"** (assignable like the others), who sees the phone number and sends that
+  person a one-time code (same flow as member invites) to set a new password.
+- **Who's who (public):** name, designation and responsibilities only. **No contact details** for the public.
+- **Wing "EXIT"** = left Saudi Arabia: **exclude** that person when the server imports the sheet.
+- **Chairman / Asst. Chairman / Convenor / etc. are labels only.** Permissions come only from super
+  admins / admins and the individually granted permissions.
+
+## Defaults I'll use unless the owner says otherwise
+- Imported Executives get the Executive type but **no admin until the owner confirms** (open question above).
+- Wings: the sheet's list cleaned up (Youth, Dawa, QHLS, Finance, Umrah, Media & Social Media/PRO,
+  Social Welfare, Education & Publicity, Career & Sports, ORG); owner confirms at import time.
+- Public posts are separate from members' announcements (with an option to also notify members).
+- QHLS / event resources: links (Drive, PDFs, YouTube) to start; file uploads later if needed.
+- Live: a link with a "LIVE" badge while on, plus a push to all app users who allowed notifications.
+- Past videos grouped by category (QHLS, events, lectures).
+- English UI first; other languages later.
+- Registered public users are kept separate from members; an admin can later convert one into a member.
