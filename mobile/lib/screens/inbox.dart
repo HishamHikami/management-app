@@ -4,7 +4,10 @@ import '../api.dart';
 import '../state.dart';
 import '../ui.dart';
 import 'announcements.dart';
+import 'committees.dart';
+import 'duties.dart';
 import 'meetings.dart';
+import 'public.dart';
 import 'tasks.dart';
 
 /// Everything that happened for you: new tasks, updates, announcements, meetings.
@@ -72,6 +75,9 @@ class _Row extends StatelessWidget {
       'task' => (Icons.task_alt_rounded, cs.primary),
       'announcement' => (Icons.campaign_rounded, Tones.amber(context)),
       'meeting' => (Icons.event_rounded, Tones.blue(context)),
+      'responsibility' => (Icons.event_repeat_rounded, Tones.amber(context)),
+      'public' => (Icons.public_rounded, cs.primary),
+      'reset' => (Icons.lock_reset_rounded, Tones.red(context)),
       _ => (Icons.notifications_rounded, cs.outline),
     };
     return Pressable(
@@ -81,11 +87,18 @@ class _Row extends StatelessWidget {
         if (unread) {
           app.api!.post('notifications/read', {'ids': [n['id']]}).then((r) => app.setCounts(r['counts'])).catchError((_) {});
         }
+        if (n['kind'] == 'reset') {
+          await push(context, const ResetRequestsScreen());
+          app.changed();
+          return;
+        }
         if (id == null) return;
         final page = switch (n['kind']) {
           'task' => TaskDetailScreen(id: id) as Widget,
           'announcement' => AnnouncementDetailScreen(id: id),
           'meeting' => MeetingDetailScreen(id: id),
+          'responsibility' => ResponsibilityDetailScreen(id: id),
+          'public' => PostDetailScreen(id: id),
           _ => null,
         };
         if (page != null) await push(context, page);
@@ -128,6 +141,64 @@ class _Row extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+
+/// Password-reset requests, for people with the "Handle password resets" permission.
+class ResetRequestsScreen extends StatelessWidget {
+  const ResetRequestsScreen({super.key});
+  @override
+  Widget build(BuildContext context) {
+    final app = AppScope.of(context);
+    return Scaffold(
+      appBar: AppBar(title: const Text('Password resets')),
+      body: Loader(
+        load: () => app.api!.get('resets'),
+        builder: (context, d, reload) {
+          final rows = (d['requests'] as List).cast<Json>();
+          return RefreshList(onRefresh: reload, children: [
+            if (rows.isEmpty) const EmptyView('No open requests.', icon: Icons.lock_reset_rounded),
+            for (final r in rows)
+              Card(
+                margin: const EdgeInsets.only(bottom: 10),
+                child: Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(r['member'] == null ? 'Unknown number' : (r['member'] as Json)['name'] as String,
+                          style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+                      Text('${r['phone']} · ${ago(r['at'] as String?)}${r['is_public'] == true ? ' · registered public user' : ''}'),
+                      const SizedBox(height: 10),
+                      Row(children: [
+                        Expanded(
+                          child: BusyButton(
+                            label: r['member'] == null ? 'Dismiss' : 'Send a code',
+                            icon: r['member'] == null ? Icons.close_rounded : Icons.vpn_key_rounded,
+                            tonal: r['member'] == null,
+                            onPressed: () async {
+                              try {
+                                final x = await app.api!.post('resets/${r['id']}/handle', r['member'] == null ? {'dismiss': true} : {});
+                                if (x['code'] != null && context.mounted) {
+                                  await showInviteCode(context, r['member'] as Json, x['code'] as String, x['message'] as String);
+                                }
+                                reload();
+                              } catch (e) {
+                                if (context.mounted) showApiError(context, e);
+                              }
+                            },
+                          ),
+                        ),
+                      ]),
+                    ],
+                  ),
+                ),
+              ),
+          ]);
+        },
       ),
     );
   }

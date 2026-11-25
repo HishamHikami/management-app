@@ -32,14 +32,14 @@ class _AnnouncementsScreenState extends State<AnnouncementsScreen> {
       ('all', 'All'),
       ('unread', unread > 0 ? 'Unread · $unread' : 'Unread'),
       ('ack', toAck > 0 ? 'To confirm · $toAck' : 'To confirm'),
-      if (app.canLead) ('sent', 'Sent'),
+      if (app.can('announcements')) ('sent', 'Sent'),
     ];
     return Scaffold(
       appBar: AppBar(
         title: const Text('Announcements'),
         actions: [if (!widget.standalone) ...appBarActions(context)],
       ),
-      floatingActionButton: app.canLead
+      floatingActionButton: app.can('announcements')
           ? FloatingActionButton.extended(
               heroTag: 'ann-fab',
               onPressed: () => openNewAnnouncement(context),
@@ -468,19 +468,20 @@ class _AnnouncementComposerState extends State<AnnouncementComposer> {
       _urgent = e['urgent'] == true;
       _ack = e['requires_ack'] == true;
       _pinned = e['pinned'] == true;
-    } else if (!app.isCore || widget.committeeId != null) {
+    } else if (!app.allWings('announcements') || widget.committeeId != null) {
       _audience = 'committees';
-      final start = widget.committeeId ?? (app.headedIds.isNotEmpty ? app.headedIds.first : null);
-      if (start != null && app.leadableIds.contains(start)) _committees = {start};
+      final mine = app.wingsFor('announcements');
+      final start = widget.committeeId ?? (mine.isNotEmpty ? mine.first : null);
+      if (start != null && mine.contains(start)) _committees = {start};
     }
   }
 
   List<Json> _committeeChoices(AppState app) =>
-      app.isCore ? app.committees : app.committees.where((c) => app.headedIds.contains(c['id'])).toList();
+      app.committeesFor('announcements');
 
-  List<Json> _peopleChoices(AppState app) => app.isCore
+  List<Json> _peopleChoices(AppState app) => app.allWings('announcements')
       ? app.members
-      : app.members.where((m) => ((m['committee_ids'] as List?) ?? []).any(app.headedIds.contains)).toList();
+      : app.members.where((m) => ((m['committee_ids'] as List?) ?? []).any(app.wingsFor('announcements').contains)).toList();
 
   int _reach(AppState app) => switch (_audience) {
     'all' => app.members.length,
@@ -529,8 +530,8 @@ class _AnnouncementComposerState extends State<AnnouncementComposer> {
     final app = AppScope.of(context);
     final cs = Theme.of(context).colorScheme;
     final audiences = <(String, String)>[
-      if (app.isCore) ('all', 'Everyone'),
-      ('committees', 'Committees'),
+      if (app.allWings('announcements')) ('all', 'Everyone'),
+      ('committees', 'Wings'),
       ('people', 'People'),
     ];
     final reach = _reach(app);

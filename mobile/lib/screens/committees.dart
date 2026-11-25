@@ -36,20 +36,20 @@ class _CommitteesScreenState extends State<CommitteesScreen> {
         : (app.isCore
               ? FloatingActionButton(
                   heroTag: 'com-fab',
-                  tooltip: 'New committee',
+                  tooltip: 'New wing',
                   onPressed: () => push(context, const CommitteeEditor()),
                   child: const Icon(Icons.add_rounded),
                 )
               : null);
     return Scaffold(
-      appBar: AppBar(title: const Text('Committees'), actions: appBarActions(context)),
+      appBar: AppBar(title: const Text('Wings'), actions: appBarActions(context)),
       floatingActionButton: AnimatedSwitcher(duration: const Duration(milliseconds: 200), child: fab),
       body: Column(
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 4, 16, 6),
             child: Segments<String>(
-              items: [('committees', 'Committees'), ('people', 'People · ${app.members.length}')],
+              items: [('committees', 'Wings'), ('people', 'People')],
               value: _tab,
               onChanged: (v) => setState(() => _tab = v),
             ),
@@ -95,7 +95,7 @@ class _CommitteeGrid extends StatelessWidget {
         final core = list.where((c) => c['is_core'] == true).toList();
         final rest = list.where((c) => c['is_core'] != true).toList();
         if (list.isEmpty) {
-          return const EmptyView('No committees yet.', icon: Icons.groups_outlined);
+          return const EmptyView('No wings yet.', icon: Icons.groups_outlined);
         }
         return RefreshList(
           onRefresh: reload,
@@ -214,8 +214,8 @@ class _CommitteeCard extends StatelessWidget {
                     child: Icon(Icons.groups_rounded, color: color, size: 21),
                   ),
                   const Spacer(),
-                  if (c['my_role'] == 'head')
-                    const Pill('Head', tone: 'brand')
+                  if (c['my_role'] != null && c['my_role'] != 'member' && c['my_role'] != '')
+                    Pill(c['my_role'] as String, tone: 'brand')
                   else if (c['my_role'] != null)
                     Icon(Icons.check_circle_rounded, size: 18, color: color),
                 ],
@@ -248,48 +248,139 @@ class _CommitteeCard extends StatelessWidget {
   }
 }
 
-class _PeopleList extends StatelessWidget {
+String statusLabel(String? s) => switch (s) {
+  'active' => 'Active',
+  'invited' => 'Invite sent',
+  'not_invited' => 'Not invited',
+  'inactive' => 'Inactive',
+  _ => '',
+};
+
+String statusTone(String? s) => switch (s) {
+  'active' => 'green',
+  'invited' => 'amber',
+  'not_invited' => 'ghost',
+  _ => 'red',
+};
+
+class _PeopleList extends StatefulWidget {
   const _PeopleList({super.key, required this.q});
   final String q;
   @override
+  State<_PeopleList> createState() => _PeopleListState();
+}
+
+class _PeopleListState extends State<_PeopleList> {
+  String _filter = 'all';
+  String? _place;
+
+  @override
   Widget build(BuildContext context) {
     final app = AppScope.of(context);
+    final manage = app.canManagePeople;
     return Loader(
-      load: () => app.api!.get('members'),
+      load: () => app.api!.get('members', query: {'all': manage ? '1' : ''}),
       builder: (context, d, reload) {
         final all = (d['members'] as List).cast<Json>();
-        final list = q.isEmpty
-            ? all
-            : all.where((m) => '${m['name']} ${m['title']} ${m['phone']} ${m['email']}'.toLowerCase().contains(q)).toList();
-        return RefreshList(
-          onRefresh: reload,
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 120),
+        final places = all.map((m) => (m['unit_place'] as String?) ?? '').where((p) => p.isNotEmpty).toSet().toList()..sort();
+        bool keep(Json m) {
+          final q = widget.q;
+          if (q.isNotEmpty &&
+              !'${m['name']} ${m['title']} ${m['phone']} ${m['email']} ${m['unit_place']} ${(m['committees'] as List).map((c) => (c as Json)['name']).join(' ')}'
+                  .toLowerCase()
+                  .contains(q)) {
+            return false;
+          }
+          if (_place != null && m['unit_place'] != _place) return false;
+          return switch (_filter) {
+            'executive' => m['member_type'] == 'executive',
+            'member' => m['member_type'] != 'executive',
+            'not_invited' => m['status'] == 'not_invited' || m['status'] == 'invited',
+            'followup' => m['needs_followup'] == true,
+            _ => true,
+          };
+        }
+
+        final list = all.where(keep).toList();
+        final execs = list.where((m) => m['member_type'] == 'executive').toList();
+        final rest = list.where((m) => m['member_type'] != 'executive').toList();
+        final filters = <(String, String)>[
+          ('all', 'All · ${all.length}'),
+          ('executive', 'Executives'),
+          ('member', 'Members'),
+          if (manage) ('not_invited', 'Not active yet'),
+          if (manage) ('followup', 'Follow-up'),
+        ];
+
+        Widget row(Json m) => PersonTile(
+          m,
+          subtitle: [
+            if ((m['title'] as String).isNotEmpty) m['title'] as String,
+            ...(m['committees'] as List).map((c) {
+              final pos = ((c as Json)['position'] as String?) ?? '';
+              return pos.isEmpty || pos.toLowerCase() == 'member' ? c['name'] as String : '${c['name']} ($pos)';
+            }),
+            if ((m['unit_place'] as String?)?.isNotEmpty == true) m['unit_place'] as String,
+          ].join(' · '),
+          trailing: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              if (m['level'] == 'super')
+                const Pill('Super admin', tone: 'brand')
+              else if (m['level'] == 'admin')
+                const Pill('Admin', tone: 'brand')
+              else if (manage && m['status'] != 'active')
+                Pill(statusLabel(m['status'] as String?), tone: statusTone(m['status'] as String?)),
+              if (manage && m['needs_followup'] == true) ...[
+                const SizedBox(height: 3),
+                Icon(Icons.flag_rounded, size: 16, color: Tones.amber(context)),
+              ],
+            ],
+          ),
+          onTap: () => push(context, MemberDetailScreen(id: m['id'] as int)),
+        );
+
+        return Column(
           children: [
-            if (list.isEmpty)
-              const EmptyView('Nobody found.', icon: Icons.person_search_outlined)
-            else
-              ListCard(
+            ChipRow(children: [
+              for (final f in filters)
+                ChoiceChip(label: Text(f.$2), selected: _filter == f.$1, showCheckmark: false, onSelected: (_) => setState(() => _filter = f.$1)),
+              if (places.isNotEmpty)
+                ActionChip(
+                  avatar: const Icon(Icons.place_outlined, size: 18),
+                  label: Text(_place ?? 'All places'),
+                  onPressed: () async {
+                    final r = await showPicker<String?>(context, title: 'Unit place', selected: _place, groups: [
+                      PickGroup([const PickOption<String?>(null, 'All places'), for (final p in places) PickOption<String?>(p, p)]),
+                    ]);
+                    if (r != null) setState(() => _place = r.value);
+                  },
+                ),
+            ]),
+            Expanded(
+              child: RefreshList(
+                onRefresh: reload,
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 120),
                 children: [
-                  for (final m in list)
-                    PersonTile(
-                      m,
-                      subtitle: [
-                        if ((m['title'] as String).isNotEmpty) m['title'] as String,
-                        ...(m['committees'] as List).map((c) => '${(c as Json)['name']}${c['role'] == 'head' ? ' (head)' : ''}'),
-                      ].join(' · '),
-                      trailing: m['is_admin'] == true ? const Pill('Admin', tone: 'brand') : null,
-                      onTap: () => push(context, MemberDetailScreen(id: m['id'] as int)),
-                    ),
+                  if (list.isEmpty) const EmptyView('Nobody found.', icon: Icons.person_search_outlined),
+                  if (execs.isNotEmpty) ...[
+                    SectionTitle('Executives · ${execs.length}'),
+                    ListCard(children: [for (final m in execs) row(m)]),
+                  ],
+                  if (rest.isNotEmpty) ...[
+                    SectionTitle('Members · ${rest.length}'),
+                    ListCard(children: [for (final m in rest) row(m)]),
+                  ],
                 ],
               ),
+            ),
           ],
         );
       },
     );
   }
 }
-
-// ======================================================================= committee detail
 
 class CommitteeDetailScreen extends StatelessWidget {
   const CommitteeDetailScreen({super.key, required this.id});
@@ -323,15 +414,13 @@ class _CommitteePage extends StatelessWidget {
     final lead = app.leadableIds.contains(id);
 
     Future<void> memberActions(Json m) async {
-      final isHead = m['role'] == 'head';
       final r = await showActions(
         context,
         title: m['name'] as String,
         actions: [
           const PickOption('view', 'View profile', icon: Icons.person_outline_rounded),
-          if (manage && app.isCore)
-            PickOption(isHead ? 'member' : 'head', isHead ? 'Make a regular member' : 'Make head', icon: Icons.workspace_premium_outlined),
-          if (manage) const PickOption('remove', 'Remove from committee', icon: Icons.person_remove_outlined, danger: true),
+          if (manage) const PickOption('position', 'Set position in this wing', icon: Icons.badge_outlined),
+          if (manage) const PickOption('remove', 'Remove from wing', icon: Icons.person_remove_outlined, danger: true),
         ],
       );
       if (!context.mounted || r == null) return;
@@ -344,7 +433,9 @@ class _CommitteePage extends StatelessWidget {
           if (!await confirm(context, title: 'Remove ${m['name']}?', message: 'They leave ${c['name']}.', action: 'Remove', danger: true)) return;
           await app.api!.delete('committees/$id/members/${m['id']}');
         } else {
-          await app.api!.patch('committees/$id/members/${m['id']}', {'role': r});
+          final pos = await pickPosition(context, current: (m['position'] as String?) ?? '');
+          if (pos == null) return;
+          await app.api!.patch('committees/$id/members/${m['id']}', {'position': pos});
         }
         app.changed(boot: true);
       } catch (e) {
@@ -382,8 +473,8 @@ class _CommitteePage extends StatelessWidget {
         context,
         title: c['name'] as String,
         actions: [
-          const PickOption('edit', 'Edit committee', icon: Icons.edit_outlined),
-          if (c['is_core'] != true) const PickOption('archive', 'Archive committee', icon: Icons.archive_outlined, danger: true),
+          const PickOption('edit', 'Edit wing', icon: Icons.edit_outlined),
+          if (c['is_core'] != true) const PickOption('archive', 'Archive wing', icon: Icons.archive_outlined, danger: true),
         ],
       );
       if (!context.mounted) return;
@@ -448,7 +539,7 @@ class _CommitteePage extends StatelessWidget {
                   ],
                   SectionTitle(
                     'Open tasks',
-                    trailing: SeeAll(onTap: () => push(context, TasksScreen(standalone: true, initialScope: app.isCore ? 'all' : 'team', committeeId: id))),
+                    trailing: SeeAll(onTap: () => push(context, TasksScreen(standalone: true, initialScope: app.allWings('tasks') ? 'all' : 'team', committeeId: id))),
                   ),
                   Appear(
                     index: i++,
@@ -482,7 +573,7 @@ class _CommitteePage extends StatelessWidget {
                   ],
                   SectionTitle(
                     'Members · ${members.length}',
-                    trailing: manage && (c['is_core'] != true || app.isAdmin) ? SeeAll(label: 'Add', onTap: addMembers) : null,
+                    trailing: manage ? SeeAll(label: 'Add', onTap: addMembers) : null,
                   ),
                   Appear(
                     index: i++,
@@ -497,7 +588,9 @@ class _CommitteePage extends StatelessWidget {
                                     if ((m['position'] as String? ?? '').isNotEmpty) m['position'] as String,
                                     if ((m['title'] as String? ?? '').isNotEmpty) m['title'] as String,
                                   ].join(' · '),
-                                  trailing: m['role'] == 'head' ? Pill('Head', tone: 'brand', icon: Icons.workspace_premium_rounded) : null,
+                                  trailing: ((m['position'] as String?) ?? '').isNotEmpty && (m['position'] as String).toLowerCase() != 'member'
+                                      ? Pill(m['position'] as String, tone: 'brand')
+                                      : null,
                                   onTap: () => memberActions(m),
                                 ),
                             ],
@@ -594,7 +687,7 @@ class _CommitteeEditorState extends State<CommitteeEditor> {
     final app = AppScope.of(context);
     final editing = widget.existing != null;
     return Scaffold(
-      appBar: AppBar(title: Text(editing ? 'Edit committee' : 'New committee')),
+      appBar: AppBar(title: Text(editing ? 'Edit wing' : 'New wing')),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
         children: [
@@ -641,7 +734,7 @@ class _CommitteeEditorState extends State<CommitteeEditor> {
           ),
           const SizedBox(height: 28),
           BusyButton(
-            label: editing ? 'Save' : 'Create committee',
+            label: editing ? 'Save' : 'Create wing',
             icon: Icons.check_rounded,
             onPressed: () async {
               setState(() => _error = null);
@@ -683,6 +776,8 @@ class MemberDetailScreen extends StatelessWidget {
   }
 }
 
+String levelLabel(String? l) => switch (l) { 'super' => 'Super admin', 'admin' => 'Admin', _ => 'Member' };
+
 class _MemberPage extends StatelessWidget {
   const _MemberPage({required this.m, required this.reload});
   final Json m;
@@ -692,9 +787,22 @@ class _MemberPage extends StatelessWidget {
     final app = AppScope.of(context);
     final cs = Theme.of(context).colorScheme;
     final committees = (m['committees'] as List).cast<Json>();
-    final tasks = (m['open_tasks'] as List).cast<Json>();
+    final tasks = ((m['open_tasks'] as List?) ?? []).cast<Json>();
+    final duties = ((m['responsibilities'] as List?) ?? []).cast<Json>();
     final manage = m['can_manage'] == true;
     final isMe = m['id'] == app.meId;
+    final status = m['status'] as String?;
+    final perms = ((m['permissions'] as Json?) ?? const {});
+
+    Future<void> sendCode() async {
+      try {
+        final x = await app.api!.post('members/${m['id']}/invite');
+        if (context.mounted) await showInviteCode(context, m, x['code'] as String, x['message'] as String);
+        reload();
+      } catch (e) {
+        if (context.mounted) showApiError(context, e);
+      }
+    }
 
     Future<void> menu() async {
       final r = await showActions(
@@ -702,10 +810,10 @@ class _MemberPage extends StatelessWidget {
         title: m['name'] as String,
         actions: [
           const PickOption('edit', 'Edit details', icon: Icons.edit_outlined),
-          PickOption('code', m['has_password'] == true ? 'New sign-in code (reset password)' : 'New invite code', icon: Icons.vpn_key_outlined),
-          if (app.isAdmin && !isMe)
-            PickOption('admin', m['is_admin'] == true ? 'Remove admin rights' : 'Make app admin', icon: Icons.admin_panel_settings_outlined),
-          if (app.isAdmin && !isMe)
+          PickOption('code', status == 'active' ? 'New sign-in code (reset password)' : 'Send invite code', icon: Icons.vpn_key_outlined),
+          if (m['can_grant'] == true) const PickOption('perms', 'Permissions', icon: Icons.tune_rounded),
+          if (m['can_set_level'] == true) const PickOption('level', 'Admin level', icon: Icons.admin_panel_settings_outlined),
+          if (app.isCore && !isMe)
             PickOption('active', m['active'] == true ? 'Deactivate' : 'Reactivate', icon: Icons.person_off_outlined, danger: m['active'] == true),
         ],
       );
@@ -713,13 +821,25 @@ class _MemberPage extends StatelessWidget {
       try {
         switch (r) {
           case 'edit':
-            push(context, PersonEditor(existing: m));
+            await push(context, PersonEditor(existing: m));
+            reload();
           case 'code':
-            final x = await app.api!.post('members/${m['id']}/invite');
-            if (context.mounted) showInviteCode(context, m, x['code'] as String, x['message'] as String);
-          case 'admin':
-            await app.api!.patch('members/${m['id']}', {'is_admin': m['is_admin'] != true});
+            await sendCode();
+          case 'perms':
+            await push(context, PermissionsEditor(member: m));
+            reload();
+          case 'level':
+            final x = await showPicker<String>(context, title: 'Admin level', selected: (m['level'] as String?) ?? '', groups: [
+              PickGroup([
+                const PickOption('', 'Member', subtitle: 'Only the permissions you tick', icon: Icons.person_outline_rounded),
+                const PickOption('admin', 'Admin', subtitle: 'Manages everything except admins', icon: Icons.shield_outlined),
+                const PickOption('super', 'Super admin', subtitle: 'Everything, including appointing admins', icon: Icons.admin_panel_settings_rounded),
+              ]),
+            ]);
+            if (x == null) return;
+            await app.api!.patch('members/${m['id']}', {'level': x.value});
             app.changed(boot: true);
+            reload();
           case 'active':
             if (m['active'] == true &&
                 !await confirm(context, title: 'Deactivate ${m['name']}?', message: 'They are signed out and can\'t sign in until reactivated.', action: 'Deactivate', danger: true)) {
@@ -727,6 +847,7 @@ class _MemberPage extends StatelessWidget {
             }
             await app.api!.patch('members/${m['id']}', {'active': m['active'] != true});
             app.changed(boot: true);
+            reload();
         }
       } catch (e) {
         if (context.mounted) showApiError(context, e);
@@ -734,75 +855,173 @@ class _MemberPage extends StatelessWidget {
     }
 
     return Scaffold(
-      appBar: AppBar(actions: [if (manage || isMe) IconButton(icon: const Icon(Icons.more_vert_rounded), onPressed: isMe && !manage ? () => push(context, PersonEditor(existing: m)) : menu)]),
+      appBar: AppBar(actions: [
+        if (manage) IconButton(icon: const Icon(Icons.more_vert_rounded), onPressed: menu)
+        else if (isMe) IconButton(icon: const Icon(Icons.edit_outlined), onPressed: () => push(context, PersonEditor(existing: m))),
+      ]),
       body: RefreshList(
         onRefresh: reload,
         padding: const EdgeInsets.fromLTRB(16, 0, 16, 40),
         children: [
           Appear(
             index: 0,
-            child: Column(
-              children: [
-                Initials(m['name'] as String, radius: 42),
-                const SizedBox(height: 12),
-                Text(m['name'] as String, textAlign: TextAlign.center, style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800)),
-                if ((m['title'] as String).isNotEmpty)
-                  Text(m['title'] as String, style: TextStyle(color: cs.onSurfaceVariant)),
-                const SizedBox(height: 10),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  alignment: WrapAlignment.center,
-                  children: [
-                    if (m['is_admin'] == true) const Pill('Admin', tone: 'brand', icon: Icons.admin_panel_settings_rounded),
-                    if (m['active'] != true) const Pill('Deactivated', tone: 'red'),
-                    if (m['invite_pending'] == true) const Pill('Invite not used yet', tone: 'amber'),
-                  ],
-                ),
-              ],
+            child: Column(children: [
+              Initials(m['name'] as String, radius: 42),
+              const SizedBox(height: 12),
+              Text(m['name'] as String, textAlign: TextAlign.center, style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800)),
+              if ((m['title'] as String).isNotEmpty) Text(m['title'] as String, style: TextStyle(color: cs.onSurfaceVariant)),
+              const SizedBox(height: 10),
+              Wrap(spacing: 6, runSpacing: 6, alignment: WrapAlignment.center, children: [
+                Pill(m['member_type'] == 'executive' ? 'Executive' : 'Member', tone: m['member_type'] == 'executive' ? 'brand' : 'neutral'),
+                if (m['level'] == 'super' || m['level'] == 'admin') Pill(levelLabel(m['level'] as String?), tone: 'brand', icon: Icons.admin_panel_settings_rounded),
+                if ((m['unit_place'] as String?)?.isNotEmpty == true) Pill(m['unit_place'] as String, tone: 'ghost', icon: Icons.place_outlined),
+                if (status != null && status != 'active') Pill(statusLabel(status), tone: statusTone(status)),
+              ]),
+            ]),
+          ),
+          if (manage && status != 'active') ...[
+            const SizedBox(height: 14),
+            BusyButton(label: status == 'invited' ? 'Send a new invite code' : 'Send invite code', icon: Icons.vpn_key_rounded, onPressed: sendCode),
+          ],
+          const SizedBox(height: 16),
+          Card(
+            margin: EdgeInsets.zero,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 4, 8),
+              child: (m['phone'] as String?)?.isNotEmpty == true || (m['email'] as String?)?.isNotEmpty == true
+                  ? ContactActions(phone: m['phone'] as String?, email: m['email'] as String?)
+                  : Padding(padding: const EdgeInsets.all(8), child: Text('No phone or email yet', style: TextStyle(color: cs.onSurfaceVariant))),
             ),
           ),
-          const SizedBox(height: 18),
-          Appear(
-            index: 1,
-            child: Card(
+          if (m['notes'] != null && ((m['notes'] as String).isNotEmpty || m['needs_followup'] == true)) ...[
+            const SectionTitle('Private notes'),
+            Card(
               margin: EdgeInsets.zero,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 8, 4, 8),
-                child: ContactActions(phone: m['phone'] as String?, email: m['email'] as String?),
-              ),
-            ),
-          ),
-          const SectionTitle('Committees'),
-          Appear(
-            index: 2,
-            child: committees.isEmpty
-                ? const Card(margin: EdgeInsets.zero, child: EmptyView('Not in any committee yet.', icon: Icons.groups_outlined))
-                : ListCard(
-                    children: [
-                      for (final c in committees)
-                        ListTile(
-                          leading: CircleAvatar(
-                            backgroundColor: colorOf(context, c).withValues(alpha: .15),
-                            child: Icon(c['is_core'] == true ? Icons.star_rounded : Icons.groups_rounded, color: colorOf(context, c), size: 20),
-                          ),
-                          title: Text(c['name'] as String, style: const TextStyle(fontWeight: FontWeight.w600)),
-                          subtitle: Text([c['role'] == 'head' ? 'Head' : 'Member', if ((c['position'] as String).isNotEmpty) c['position']].join(' · ')),
-                          trailing: const Icon(Icons.chevron_right_rounded),
-                          onTap: () => push(context, CommitteeDetailScreen(id: c['id'] as int)),
-                        ),
-                    ],
-                  ),
-          ),
-          if (tasks.isNotEmpty) ...[
-            const SectionTitle('Working on'),
-            Appear(
-              index: 3,
-              child: ListCard(
-                children: [for (final t in tasks) TaskTile(t, onTap: () => push(context, TaskDetailScreen(id: t['id'] as int)))],
+              color: Tones.amber(context).withValues(alpha: .08),
+              child: ListTile(
+                leading: Icon(m['needs_followup'] == true ? Icons.flag_rounded : Icons.sticky_note_2_outlined, color: Tones.amber(context)),
+                title: Text((m['notes'] as String).isEmpty ? 'Needs follow-up' : m['notes'] as String),
+                subtitle: const Text('Only admins see this'),
               ),
             ),
           ],
+          const SectionTitle('Wings'),
+          committees.isEmpty
+              ? const Card(margin: EdgeInsets.zero, child: EmptyView('Not in any wing yet.', icon: Icons.groups_outlined))
+              : ListCard(children: [
+                  for (final c in committees)
+                    ListTile(
+                      leading: CircleAvatar(backgroundColor: colorOf(context, c).withValues(alpha: .15), child: Icon(Icons.groups_rounded, color: colorOf(context, c), size: 20)),
+                      title: Text(c['name'] as String, style: const TextStyle(fontWeight: FontWeight.w600)),
+                      subtitle: Text(((c['position'] as String?) ?? '').isEmpty ? 'Member' : c['position'] as String),
+                      trailing: const Icon(Icons.chevron_right_rounded),
+                      onTap: () => push(context, CommitteeDetailScreen(id: c['id'] as int)),
+                    ),
+                ]),
+          if (perms.isNotEmpty) ...[
+            const SectionTitle('Permissions'),
+            Wrap(spacing: 6, runSpacing: 6, children: [
+              for (final p in app.choice('permissions'))
+                if (perms.containsKey(p['value']))
+                  Pill('${p['label']}${p['wing_scoped'] == true ? (perms[p['value']] == 'all' ? ' · all wings' : ' · own wings') : ''}', tone: 'ghost'),
+            ]),
+          ],
+          if (duties.isNotEmpty) ...[
+            const SectionTitle('Responsibilities'),
+            ListCard(children: [for (final r in duties) ListTile(leading: const Icon(Icons.event_repeat_rounded), title: Text(r['title'] as String), subtitle: Text(r['repeat_label'] as String))]),
+          ],
+          if (tasks.isNotEmpty) ...[
+            const SectionTitle('Working on'),
+            ListCard(children: [for (final t in tasks) TaskTile(t, onTap: () => push(context, TaskDetailScreen(id: t['id'] as int)))]),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// Positions are labels: pick a common one or type your own.
+Future<String?> pickPosition(BuildContext context, {String current = ''}) async {
+  final app = AppScope.read(context);
+  final custom = TextEditingController(text: current);
+  return showSheet<String>(context, title: 'Position', builder: (ctx) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      Wrap(spacing: 8, runSpacing: 8, children: [
+        for (final p in ((app.boot?['choices'] as Json?)?['positions'] as List? ?? []).cast<String>())
+            ChoiceChip(label: Text(p), selected: current == p, showCheckmark: false, onSelected: (_) => Navigator.pop(ctx, p)),
+      ]),
+      const SizedBox(height: 14),
+      TextField(controller: custom, textCapitalization: TextCapitalization.words, decoration: const InputDecoration(labelText: 'Or type a position')),
+      const SizedBox(height: 14),
+      FilledButton(onPressed: () => Navigator.pop(ctx, custom.text.trim()), child: const Text('Save')),
+    ],
+  ));
+}
+
+/// Tick the permissions someone has, each for their own wings or all wings.
+class PermissionsEditor extends StatefulWidget {
+  const PermissionsEditor({super.key, required this.member});
+  final Json member;
+  @override
+  State<PermissionsEditor> createState() => _PermissionsEditorState();
+}
+
+class _PermissionsEditorState extends State<PermissionsEditor> {
+  late final Map<String, String> _p = Map<String, String>.from((widget.member['permissions'] as Json?) ?? const {});
+
+  @override
+  Widget build(BuildContext context) {
+    final app = AppScope.of(context);
+    final cs = Theme.of(context).colorScheme;
+    return Scaffold(
+      appBar: AppBar(title: Text('Permissions · ${(widget.member['name'] as String).split(' ').first}')),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 32),
+        children: [
+          Text('Positions are labels only: these switches decide what ${(widget.member['name'] as String).split(' ').first} can do. '
+              '"Own wings" means the wings they belong to.', style: TextStyle(color: cs.onSurfaceVariant, height: 1.4)),
+          const SizedBox(height: 12),
+          Card(
+            margin: EdgeInsets.zero,
+            child: Column(children: [
+              for (final p in app.choice('permissions'))
+                Builder(builder: (context) {
+                  final key = p['value'] as String;
+                  final on = _p.containsKey(key);
+                  final mayGive = app.can(key);
+                  return Column(children: [
+                    SwitchListTile(
+                      title: Text(p['label'] as String),
+                      value: on,
+                      onChanged: mayGive ? (v) => setState(() => v ? _p[key] = 'own' : _p.remove(key)) : null,
+                    ),
+                    if (on && p['wing_scoped'] == true)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                        child: Segments<String>(
+                          items: const [('own', 'Own wings'), ('all', 'All wings')],
+                          value: _p[key]!,
+                          onChanged: (v) => setState(() => _p[key] = (v == 'all' && !app.allWings(key)) ? 'own' : v),
+                        ),
+                      ),
+                  ]);
+                }),
+            ]),
+          ),
+          const SizedBox(height: 24),
+          BusyButton(label: 'Save', icon: Icons.check_rounded, onPressed: () async {
+            final nav = Navigator.of(context);
+            try {
+              await app.api!.put('members/${widget.member['id']}/permissions', {
+                'permissions': [for (final e in _p.entries) {'perm': e.key, 'all_wings': e.value == 'all'}],
+              });
+              app.changed(boot: true);
+              nav.pop();
+            } catch (e) {
+              if (context.mounted) showApiError(context, e);
+            }
+          }),
         ],
       ),
     );
@@ -869,8 +1088,14 @@ class _PersonEditorState extends State<PersonEditor> {
   late final _email = TextEditingController(text: widget.existing?['email'] as String?);
   late final _phone = TextEditingController(text: widget.existing?['phone'] as String?);
   late final _title = TextEditingController(text: widget.existing?['title'] as String?);
-  final Map<int, String> _roles = {}; // committee id → head/member
-  bool _admin = false;
+  late final _place = TextEditingController(text: widget.existing?['unit_place'] as String?);
+  late final _notes = TextEditingController(text: widget.existing?['notes'] as String?);
+  late String _type = (widget.existing?['member_type'] as String?) ?? 'member';
+  late bool _followup = widget.existing?['needs_followup'] == true;
+  late final Map<int, String> _wings = {
+    for (final c in ((widget.existing?['committees'] as List?) ?? []).cast<Json>()) c['id'] as int: (c['position'] as String?) ?? '',
+  };
+  bool _sendInvite = true;
   ApiException? _error;
 
   bool get _editing => widget.existing != null;
@@ -879,110 +1104,142 @@ class _PersonEditorState extends State<PersonEditor> {
   Widget build(BuildContext context) {
     final app = AppScope.of(context);
     final cs = Theme.of(context).colorScheme;
-    final committees = app.committees.where((c) => c['is_core'] != true || app.isAdmin).toList();
+    final isMe = widget.existing?['id'] == app.meId;
+    final manage = app.canManagePeople && !isMe;
+    final wingChoices = app.isCore ? app.committees : app.committeesFor('people');
+    final places = ((app.boot?['choices'] as Json?)?['unit_places'] as List? ?? []).cast<String>();
+    final designations = ((app.boot?['choices'] as Json?)?['designations'] as List? ?? []).cast<String>();
     return Scaffold(
-      appBar: AppBar(title: Text(_editing ? 'Edit person' : 'Add a person')),
+      appBar: AppBar(title: Text(_editing ? (isMe ? 'My details' : 'Edit person') : 'Add a person')),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
         children: [
-          TextField(
-            controller: _name,
-            autofocus: !_editing,
-            textCapitalization: TextCapitalization.words,
-            decoration: InputDecoration(labelText: 'Full name', prefixIcon: const Icon(Icons.badge_outlined), errorText: fieldError(_error, 'name')),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _phone,
-            keyboardType: TextInputType.phone,
-            decoration: InputDecoration(labelText: 'Mobile', hintText: '+966 5x xxx xxxx', prefixIcon: const Icon(Icons.phone_outlined), errorText: fieldError(_error, 'phone')),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _email,
-            keyboardType: TextInputType.emailAddress,
-            autocorrect: false,
-            decoration: InputDecoration(labelText: 'Email (optional)', prefixIcon: const Icon(Icons.mail_outline), errorText: fieldError(_error, 'email')),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _title,
-            textCapitalization: TextCapitalization.words,
-            decoration: const InputDecoration(labelText: 'Position (optional)', hintText: 'e.g. General Secretary', prefixIcon: Icon(Icons.work_outline_rounded)),
-          ),
-          if (!_editing) ...[
-            const SizedBox(height: 20),
-            Text('Committees', style: TextStyle(fontWeight: FontWeight.w700, color: cs.onSurfaceVariant)),
-            const SizedBox(height: 4),
-            Text('Tap once to add as member, again to make head.', style: TextStyle(fontSize: 12.5, color: cs.onSurfaceVariant)),
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                for (final c in committees)
-                  FilterChip(
-                    avatar: _roles[c['id']] == 'head'
-                        ? const Icon(Icons.workspace_premium_rounded, size: 18)
-                        : Dot(colorOf(context, c)),
-                    label: Text('${c['name']}${_roles[c['id']] == 'head' ? ' · Head' : ''}'),
-                    selected: _roles.containsKey(c['id']),
-                    showCheckmark: false,
-                    onSelected: (_) {
-                      HapticFeedback.selectionClick();
-                      final id = c['id'] as int;
-                      setState(() {
-                        final r = _roles[id];
-                        if (r == null) {
-                          _roles[id] = 'member';
-                        } else if (r == 'member' && app.isCore) {
-                          _roles[id] = 'head';
-                        } else {
-                          _roles.remove(id);
-                        }
-                      });
-                    },
-                  ),
-              ],
+          if (!isMe) ...[
+            Segments<String>(
+              items: const [('member', 'Member'), ('executive', 'Executive')],
+              value: _type,
+              onChanged: (v) => setState(() => _type = v),
             ),
-            if (app.isAdmin) ...[
-              const SizedBox(height: 14),
-              Card(
-                margin: EdgeInsets.zero,
-                child: SwitchListTile(
-                  secondary: const Icon(Icons.admin_panel_settings_outlined),
-                  title: const Text('App admin'),
-                  subtitle: const Text('Can add people, change roles and the core committee'),
-                  value: _admin,
-                  onChanged: (v) => setState(() => _admin = v),
+            if (!_editing && _type == 'executive')
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text(app.isSuper ? 'Executives become admins by default.' : 'A super admin can make them an admin later.',
+                    style: TextStyle(fontSize: 12.5, color: cs.onSurfaceVariant)),
+              ),
+            const SizedBox(height: 14),
+          ],
+          TextField(controller: _name, autofocus: !_editing, textCapitalization: TextCapitalization.words,
+              decoration: InputDecoration(labelText: 'Full name', prefixIcon: const Icon(Icons.badge_outlined), errorText: fieldError(_error, 'name'))),
+          const SizedBox(height: 12),
+          TextField(controller: _phone, keyboardType: TextInputType.phone,
+              decoration: InputDecoration(labelText: 'Mobile', hintText: '+966 5x xxx xxxx', prefixIcon: const Icon(Icons.phone_outlined), errorText: fieldError(_error, 'phone'))),
+          const SizedBox(height: 12),
+          TextField(controller: _email, keyboardType: TextInputType.emailAddress, autocorrect: false,
+              decoration: InputDecoration(labelText: 'Email (optional)', prefixIcon: const Icon(Icons.mail_outline), errorText: fieldError(_error, 'email'))),
+          const SizedBox(height: 12),
+          Autocomplete<String>(
+            initialValue: TextEditingValue(text: _title.text),
+            optionsBuilder: (v) => designations.where((d) => d.toLowerCase().contains(v.text.toLowerCase())),
+            onSelected: (v) => _title.text = v,
+            fieldViewBuilder: (context, c, f, _) {
+              c.addListener(() => _title.text = c.text);
+              return TextField(controller: c, focusNode: f, textCapitalization: TextCapitalization.words,
+                  decoration: const InputDecoration(labelText: 'Designation (optional)', hintText: 'e.g. Secretary', prefixIcon: Icon(Icons.work_outline_rounded)));
+            },
+          ),
+          const SizedBox(height: 12),
+          Autocomplete<String>(
+            initialValue: TextEditingValue(text: _place.text),
+            optionsBuilder: (v) => places.where((p) => p.toLowerCase().contains(v.text.toLowerCase())),
+            onSelected: (v) => _place.text = v,
+            fieldViewBuilder: (context, c, f, _) {
+              c.addListener(() => _place.text = c.text);
+              return TextField(controller: c, focusNode: f, textCapitalization: TextCapitalization.words,
+                  decoration: const InputDecoration(labelText: 'Unit place (optional)', hintText: 'e.g. Malaz Area', prefixIcon: Icon(Icons.place_outlined)));
+            },
+          ),
+          if (manage || (!_editing && app.canManagePeople)) ...[
+            const SizedBox(height: 20),
+            Text('Wings', style: TextStyle(fontWeight: FontWeight.w700, color: cs.onSurfaceVariant)),
+            const SizedBox(height: 4),
+            Text('Tap a wing to add them; tap again to set their position (a label).', style: TextStyle(fontSize: 12.5, color: cs.onSurfaceVariant)),
+            const SizedBox(height: 10),
+            Wrap(spacing: 8, runSpacing: 8, children: [
+              for (final c in wingChoices)
+                FilterChip(
+                  avatar: Dot(colorOf(context, c)),
+                  label: Text(_wings.containsKey(c['id']) && _wings[c['id']]!.isNotEmpty ? '${c['name']} · ${_wings[c['id']]}' : c['name'] as String),
+                  selected: _wings.containsKey(c['id']),
+                  showCheckmark: false,
+                  onSelected: (_) async {
+                    HapticFeedback.selectionClick();
+                    final id = c['id'] as int;
+                    if (!_wings.containsKey(id)) {
+                      setState(() => _wings[id] = '');
+                      return;
+                    }
+                    final r = await showActions(context, title: c['name'] as String, actions: const [
+                      PickOption('pos', 'Set position', icon: Icons.badge_outlined),
+                      PickOption('remove', 'Remove from wing', icon: Icons.close_rounded, danger: true),
+                    ]);
+                    if (!context.mounted) return;
+                    if (r == 'remove') setState(() => _wings.remove(id));
+                    if (r == 'pos') {
+                      final pos = await pickPosition(context, current: _wings[id] ?? '');
+                      if (pos != null) setState(() => _wings[id] = pos);
+                    }
+                  },
                 ),
+            ]),
+            if (app.isCore) ...[
+              const SizedBox(height: 18),
+              TextField(controller: _notes, minLines: 2, maxLines: 5,
+                  decoration: const InputDecoration(labelText: 'Private notes (only admins see these)', alignLabelWithHint: true, prefixIcon: Icon(Icons.sticky_note_2_outlined))),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Needs follow-up'),
+                value: _followup,
+                onChanged: (v) => setState(() => _followup = v),
               ),
             ],
+            if (!_editing)
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Create an invite code now'),
+                subtitle: const Text('You can also send it later from their page'),
+                value: _sendInvite,
+                onChanged: (v) => setState(() => _sendInvite = v),
+              ),
           ],
-          const SizedBox(height: 28),
+          const SizedBox(height: 24),
           BusyButton(
-            label: _editing ? 'Save' : 'Add & get invite code',
+            label: _editing ? 'Save' : (_sendInvite ? 'Add & get invite code' : 'Add person'),
             icon: _editing ? Icons.check_rounded : Icons.person_add_alt_1_rounded,
             onPressed: () async {
               setState(() => _error = null);
               final nav = Navigator.of(context);
-              final body = {'name': _name.text, 'email': _email.text, 'phone': _phone.text, 'title': _title.text};
+              final body = <String, dynamic>{
+                'name': _name.text, 'email': _email.text, 'phone': _phone.text, 'title': _title.text,
+                'unit_place': _place.text,
+                if (!isMe) 'member_type': _type,
+                if (manage || !_editing) 'committees': [for (final e in _wings.entries) {'id': e.key, 'position': e.value}],
+                if (app.isCore && !isMe) 'notes': _notes.text,
+                if (app.isCore && !isMe) 'needs_followup': _followup,
+              };
               try {
                 if (_editing) {
                   await app.api!.patch('members/${widget.existing!['id']}', body);
                   app.changed(boot: true);
                   nav.pop();
                 } else {
-                  final r = await app.api!.post('members', {
-                    ...body,
-                    'is_admin': _admin,
-                    'committees': [for (final e in _roles.entries) {'id': e.key, 'role': e.value}],
-                  });
+                  final r = await app.api!.post('members', {...body, 'invite': _sendInvite});
                   app.changed(boot: true);
                   final member = r['member'] as Json;
                   nav.pop();
-                  // ignore: use_build_context_synchronously
-                  showInviteCode(nav.context, member, r['code'] as String, r['message'] as String);
+                  if (r['code'] != null) {
+                    // ignore: use_build_context_synchronously
+                    showInviteCode(nav.context, member, r['code'] as String, r['message'] as String);
+                  }
                 }
               } on ApiException catch (e) {
                 setState(() => _error = e);

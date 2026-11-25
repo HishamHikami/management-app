@@ -33,7 +33,7 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
         title: const Text('Meetings'),
         actions: [if (!widget.standalone) ...appBarActions(context)],
       ),
-      floatingActionButton: app.canLead
+      floatingActionButton: app.wingsFor('meetings').isNotEmpty
           ? FloatingActionButton(
               heroTag: 'meet-fab',
               tooltip: 'New meeting',
@@ -635,9 +635,10 @@ class _MeetingEditorState extends State<MeetingEditor> {
       _start = DateTime.parse(e['start'] as String).toLocal();
       _end = e['end'] == null ? null : DateTime.parse(e['end'] as String).toLocal();
     } else {
-      _committee = app.leadableIds.contains(widget.committeeId)
+      final mine = app.wingsFor('meetings');
+      _committee = mine.contains(widget.committeeId)
           ? widget.committeeId
-          : (!app.isCore && app.headedIds.isNotEmpty ? app.headedIds.first : null);
+          : (!app.allWings('meetings') && mine.isNotEmpty ? mine.first : null);
       final now = DateTime.now();
       _start = DateTime(now.year, now.month, now.day + 1, 21);
     }
@@ -688,9 +689,9 @@ class _MeetingEditorState extends State<MeetingEditor> {
             const SizedBox(height: 12),
             CommitteeField(
               label: 'Who is invited',
-              committees: app.leadableCommittees,
+              committees: app.committeesFor('meetings'),
               value: _committee,
-              noneLabel: app.isCore ? 'General meeting · every member' : null,
+              noneLabel: app.allWings('meetings') ? 'General meeting · every member' : null,
               onChanged: (v) => setState(() => _committee = v),
             ),
           ],

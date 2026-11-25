@@ -16,8 +16,9 @@ Future<void> openNewTask(BuildContext context, {int? committeeId}) async {
 // ======================================================================= list
 
 class TasksScreen extends StatefulWidget {
-  const TasksScreen({super.key, this.initialScope, this.standalone = false, this.committeeId});
+  const TasksScreen({super.key, this.initialScope, this.standalone = false, this.committeeId, this.title});
   final String? initialScope;
+  final Widget? title;
   final bool standalone;
   final int? committeeId;
   @override
@@ -43,8 +44,8 @@ class _TasksScreenState extends State<TasksScreen> {
     final app = AppScope.of(context);
     final scopes = <(String, String)>[
       ('mine', 'Mine'),
-      ('team', 'My committees'),
-      if (app.isCore) ('all', 'All'),
+      ('team', 'My wings'),
+      if (app.allWings('tasks')) ('all', 'All'),
     ];
     if (!scopes.any((s) => s.$1 == _scope)) _scope = 'team';
     return Scaffold(
@@ -64,7 +65,7 @@ class _TasksScreenState extends State<TasksScreen> {
                   ),
                   onSubmitted: (v) => setState(() => _q = v.trim()),
                 )
-              : const Text('Tasks', key: ValueKey('t')),
+              : (widget.title ?? const Text('Tasks', key: ValueKey('t'))),
         ),
         actions: [
           IconButton(
@@ -80,7 +81,7 @@ class _TasksScreenState extends State<TasksScreen> {
           if (!widget.standalone) ...appBarActions(context),
         ],
       ),
-      floatingActionButton: app.canLead
+      floatingActionButton: app.can('tasks') && app.wingsFor('tasks').isNotEmpty
           ? FloatingActionButton(
               heroTag: 'task-fab',
               tooltip: 'New task',
@@ -148,18 +149,18 @@ class _CommitteeMenuChip extends StatelessWidget {
       label: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(c == null ? 'All committees' : c['name'] as String),
+          Text(c == null ? 'All wings' : c['name'] as String),
           const Icon(Icons.arrow_drop_down_rounded, size: 20),
         ],
       ),
       onPressed: () async {
         final r = await showPicker<int?>(
           context,
-          title: 'Committee',
+          title: 'Wing',
           selected: value,
           groups: [
             PickGroup([
-              const PickOption<int?>(null, 'All committees', icon: Icons.all_inclusive_rounded),
+              const PickOption<int?>(null, 'All wings', icon: Icons.all_inclusive_rounded),
               for (final c in app.committees)
                 PickOption<int?>(c['id'] as int, c['name'] as String, color: colorOf(context, c)),
             ]),
@@ -332,7 +333,7 @@ class _TaskPageState extends State<_TaskPage> {
   }
 
   Future<void> _reassign() async {
-    final committees = app.leadableCommittees;
+    final committees = app.committeesFor('tasks');
     int committee = (t['committee'] as Json)['id'] as int;
     Set<int> people = (t['assignees'] as List).map((a) => (a as Json)['id'] as int).toSet();
     final note = TextEditingController();
@@ -358,7 +359,7 @@ class _TaskPageState extends State<_TaskPage> {
               label: 'Assigned to',
               people: assignablePeople(app, committee),
               value: people,
-              placeholder: 'The whole committee',
+              placeholder: 'The whole wing',
               onChanged: (v) => set(() => people = v),
             ),
             const SizedBox(height: 12),
@@ -467,7 +468,7 @@ class _TaskPageState extends State<_TaskPage> {
                           label: 'ASSIGNED TO',
                           onTap: t['can_manage'] == true ? _reassign : null,
                           child: assignees.isEmpty
-                              ? Text('The whole ${(t['committee'] as Json)['name']} committee')
+                              ? Text('The whole ${(t['committee'] as Json)['name']} wing')
                               : Wrap(
                                   spacing: 10,
                                   runSpacing: 6,
@@ -755,7 +756,7 @@ class _TimelineBody extends StatelessWidget {
 /// committee (the committee's own members first), only its members for heads.
 List<Json> assignablePeople(AppState app, int? committee) {
   final inC = app.members.where((m) => ((m['committee_ids'] as List?) ?? []).contains(committee)).toList();
-  if (!app.isCore) return inC;
+  if (!app.allWings('tasks')) return inC;
   final rest = app.members.where((m) => !inC.contains(m)).toList();
   return [...inC, ...rest];
 }
@@ -789,11 +790,11 @@ class _TaskEditorState extends State<TaskEditor> {
       _priority = t['priority'] as int;
       _due = t['due_date'] == null ? null : DateTime.parse(t['due_date'] as String);
     } else {
-      final ids = app.leadableIds;
+      final ids = app.wingsFor('tasks');
       _committee = ids.contains(widget.committeeId)
           ? widget.committeeId
-          : app.headedIds.isNotEmpty && !app.isCore
-          ? app.headedIds.first
+          : ids.isNotEmpty && !app.allWings('tasks')
+          ? ids.first
           : null;
     }
   }
@@ -858,7 +859,7 @@ class _TaskEditorState extends State<TaskEditor> {
           if (!_editing) ...[
             const SizedBox(height: 12),
             CommitteeField(
-              committees: app.leadableCommittees,
+              committees: app.committeesFor('tasks'),
               value: _committee,
               onChanged: (v) => setState(() {
                 _committee = v;
@@ -880,7 +881,7 @@ class _TaskEditorState extends State<TaskEditor> {
                   label: 'Assign to',
                   people: assignablePeople(app, _committee),
                   value: _people,
-                  placeholder: 'The whole committee',
+                  placeholder: 'The whole wing',
                   onChanged: (v) => setState(() => _people = v),
                 ),
               ),

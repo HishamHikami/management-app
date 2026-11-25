@@ -7,7 +7,8 @@ import '../ui.dart';
 import 'committees.dart';
 
 class ProfileScreen extends StatelessWidget {
-  const ProfileScreen({super.key});
+  const ProfileScreen({super.key, this.root = false});
+  final bool root;
 
   @override
   Widget build(BuildContext context) {
@@ -17,15 +18,17 @@ class ProfileScreen extends StatelessWidget {
     final committees = ((me['committees'] as List?) ?? []).cast<Json>();
     final role = app.isDeveloper
         ? 'Developer'
-        : app.isAdmin
-        ? 'Admin'
+        : app.isPublic
+        ? 'Registered'
+        : app.isSuper
+        ? 'Super admin'
         : app.isCore
-        ? 'Core committee'
-        : app.headedIds.isNotEmpty
-        ? 'Committee head'
+        ? 'Admin'
+        : me['member_type'] == 'executive'
+        ? 'Executive'
         : 'Member';
     return Scaffold(
-      appBar: AppBar(title: const Text('Profile')),
+      appBar: AppBar(title: Text(root ? 'Me' : 'Profile')),
       body: RefreshList(
         onRefresh: app.refreshBoot,
         children: [
@@ -38,7 +41,7 @@ class ProfileScreen extends StatelessWidget {
           const SizedBox(height: 18),
           ListCard(
             children: [
-              ListTile(
+              if (!app.isPublic) ListTile(
                 leading: const Icon(Icons.edit_outlined),
                 title: const Text('Edit my details'),
                 subtitle: Text([me['phone'], me['email']].where((s) => (s as String?)?.isNotEmpty == true).join(' · ')),
@@ -52,12 +55,12 @@ class ProfileScreen extends StatelessWidget {
                 title: const Text('Change password'),
                 onTap: () => _changePassword(context),
               ),
-              ListTile(
+              if (!app.isPublic) ListTile(
                 leading: const Icon(Icons.groups_outlined),
-                title: const Text('My committees'),
+                title: const Text('My wings'),
                 subtitle: Text(committees.isEmpty
                     ? 'None yet'
-                    : committees.map((c) => '${c['name']}${c['role'] == 'head' ? ' (head)' : ''}').join(', ')),
+                    : committees.map((c) => ((c['position'] as String?) ?? '').isEmpty ? c['name'] : '${c['name']} (${c['position']})').join(', ')),
                 onTap: () => push(context, MemberDetailScreen(id: app.meId)),
               ),
               ListTile(

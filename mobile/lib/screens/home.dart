@@ -6,9 +6,11 @@ import '../state.dart';
 import '../ui.dart';
 import 'announcements.dart';
 import 'committees.dart';
+import 'duties.dart';
 import 'inbox.dart';
 import 'meetings.dart';
 import 'profile.dart';
+import 'public.dart';
 import 'tasks.dart';
 
 /// App-bar actions on every tab: inbox (with unread count) and your profile.
@@ -34,13 +36,21 @@ List<Widget> appBarActions(BuildContext context) {
 
 /// "Create" sheet for leaders: task, announcement or meeting.
 Future<void> openCreate(BuildContext context) async {
+  final app = AppScope.read(context);
   final r = await showActions(
     context,
     title: 'Create',
-    actions: const [
-      PickOption('task', 'Task', subtitle: 'Assign work to a committee or people', icon: Icons.task_alt_rounded),
-      PickOption('announcement', 'Announcement', subtitle: 'Tell everyone, committees or people', icon: Icons.campaign_rounded),
-      PickOption('meeting', 'Meeting', subtitle: 'Call a committee or general meeting', icon: Icons.event_rounded),
+    actions: [
+      if (app.wingsFor('tasks').isNotEmpty)
+        const PickOption('task', 'Task', subtitle: 'Assign work to a wing or people', icon: Icons.task_alt_rounded),
+      if (app.wingsFor('responsibilities').isNotEmpty)
+        const PickOption('duty', 'Responsibility', subtitle: 'A recurring duty for someone', icon: Icons.event_repeat_rounded),
+      if (app.wingsFor('announcements').isNotEmpty)
+        const PickOption('announcement', 'Announcement', subtitle: 'Tell members, wings or people', icon: Icons.campaign_rounded),
+      if (app.wingsFor('meetings').isNotEmpty)
+        const PickOption('meeting', 'Meeting', subtitle: 'Call a wing or general meeting', icon: Icons.event_rounded),
+      if (app.can('public'))
+        const PickOption('public', 'Public post', subtitle: 'News, event, live or video for everyone', icon: Icons.public_rounded),
     ],
   );
   if (!context.mounted) return;
@@ -51,6 +61,10 @@ Future<void> openCreate(BuildContext context) async {
       openNewAnnouncement(context);
     case 'meeting':
       openNewMeeting(context);
+    case 'duty':
+      push(context, const ResponsibilityEditor());
+    case 'public':
+      push(context, const PostEditor());
   }
 }
 
@@ -72,7 +86,7 @@ class HomeScreen extends StatelessWidget {
         ),
         actions: appBarActions(context),
       ),
-      floatingActionButton: app.canLead
+      floatingActionButton: (app.canLead || app.can('public'))
           ? FloatingActionButton.extended(
               onPressed: () => openCreate(context),
               icon: const Icon(Icons.add_rounded),
@@ -139,6 +153,8 @@ class _HomeBody extends StatelessWidget {
           ),
         ),
         Appear(index: i++, child: _Hero(stats: stats)),
+        const SizedBox(height: 12),
+        Appear(index: i++, child: const _Community()),
         if (anns.isNotEmpty) ...[
           SectionTitle('Announcements', trailing: SeeAll(onTap: () => push(context, const AnnouncementsScreen(standalone: true)))),
           for (final a in anns)
@@ -159,6 +175,10 @@ class _HomeBody extends StatelessWidget {
             ),
           ),
         ],
+        if ((d['duties'] as List?)?.isNotEmpty == true) ...[
+          const SectionTitle('My duties'),
+          Appear(index: i++, child: ListCard(children: [for (final r in (d['duties'] as List).cast<Json>()) DutyTile(r: r)])),
+        ],
         SectionTitle('My tasks', trailing: tasks.isEmpty ? null : SeeAll(onTap: () => push(context, const TasksScreen(initialScope: 'mine', standalone: true)))),
         Appear(
           index: i++,
@@ -174,7 +194,7 @@ class _HomeBody extends StatelessWidget {
                 ),
         ),
         if (overview.isNotEmpty) ...[
-          SectionTitle(app.isCore ? 'Committees at a glance' : 'Your committees'),
+          SectionTitle(app.isCore ? 'Wings at a glance' : 'Your wings'),
           for (final c in overview)
             Appear(index: i++, child: _CommitteeGlance(c: c)),
         ],
@@ -296,6 +316,36 @@ class _CommitteeGlance extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+
+/// Members reach the public side (live, events, videos, QHLS, Who's who) from here.
+class _Community extends StatelessWidget {
+  const _Community();
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    Widget item(IconData icon, String label, Widget page) => Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: ActionChip(
+        avatar: Icon(icon, size: 18, color: cs.primary),
+        label: Text(label),
+        onPressed: () => push(context, page),
+      ),
+    );
+    return SizedBox(
+      height: 44,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        children: [
+          item(Icons.public_rounded, 'Community', const PublicHomeScreen()),
+          item(Icons.play_circle_outline_rounded, 'Videos', const VideosScreen()),
+          item(Icons.menu_book_outlined, 'QHLS', const ProgramsScreen()),
+          item(Icons.groups_outlined, "Who's who", const WhosWhoScreen()),
+        ],
       ),
     );
   }

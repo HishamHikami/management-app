@@ -7,13 +7,14 @@ import '../ui.dart';
 
 /// Sign in with email/phone + password, or join with an invite code from an admin.
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key});
+  const LoginScreen({super.key, this.startWithInvite = false});
+  final bool startWithInvite;
   @override
   State<LoginScreen> createState() => _LoginScreenState();
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  bool _invite = false;
+  late bool _invite = widget.startWithInvite;
 
   Future<void> _changeServer() async {
     final app = AppScope.read(context);
@@ -42,6 +43,8 @@ class _LoginScreenState extends State<LoginScreen> {
     final app = AppScope.of(context);
     final cs = Theme.of(context).colorScheme;
     return Scaffold(
+      extendBodyBehindAppBar: true,
+      appBar: Navigator.of(context).canPop() ? AppBar(backgroundColor: Colors.transparent) : null,
       body: Stack(
         children: [
           // Soft brand glow behind the form.
@@ -160,8 +163,10 @@ class _SignInFormState extends State<_SignInForm> {
       _error = null;
     });
     try {
+      final nav = Navigator.of(context);
       await AppScope.read(context).login(_id.text.trim(), _pass.text);
       HapticFeedback.mediumImpact();
+      nav.popUntil((r) => r.isFirst);
     } on ApiException catch (e) {
       HapticFeedback.heavyImpact();
       setState(() => _error = e.message);
@@ -184,7 +189,7 @@ class _SignInFormState extends State<_SignInForm> {
             autofillHints: const [AutofillHints.username, AutofillHints.email, AutofillHints.telephoneNumber],
             autocorrect: false,
             textInputAction: TextInputAction.next,
-            decoration: const InputDecoration(labelText: 'Email or phone', prefixIcon: Icon(Icons.person_outline_rounded)),
+            decoration: const InputDecoration(labelText: 'Mobile number or email', prefixIcon: Icon(Icons.person_outline_rounded)),
           ),
           const SizedBox(height: 12),
           TextField(
@@ -223,11 +228,11 @@ class _SignInFormState extends State<_SignInForm> {
           OutlinedButton.icon(
             onPressed: widget.onInvite,
             icon: const Icon(Icons.vpn_key_outlined),
-            label: const Text('I have an invite code'),
+            label: const Text('Members: I have an invite code'),
           ),
           const SizedBox(height: 10),
           Text(
-            'Forgot your password? Ask an admin for a new code.',
+            'Forgot your password? Use "Forgot password" on the Me page.',
             textAlign: TextAlign.center,
             style: TextStyle(fontSize: 12.5, color: Theme.of(context).colorScheme.onSurfaceVariant),
           ),
@@ -280,7 +285,9 @@ class _InviteFormState extends State<_InviteForm> {
 
   Future<void> _join() => _run(() async {
     if (_pass.text != _pass2.text) throw ApiException('The two passwords don\'t match.');
+    final nav = Navigator.of(context);
     await AppScope.read(context).acceptInvite(_code.text.trim(), _pass.text);
+    nav.popUntil((r) => r.isFirst);
   });
 
   @override

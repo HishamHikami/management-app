@@ -39,7 +39,6 @@ class AppState extends ChangeNotifier {
   final messages = GlobalKey<ScaffoldMessengerState>();
   Timer? _poll;
   String? _pushToken;
-  bool _pushReady = false;
   bool _pushStarted = false;
   bool _listening = false;
   bool _handlers = false;
@@ -49,14 +48,27 @@ class AppState extends ChangeNotifier {
   int get meId => (me['id'] as int?) ?? 0;
   bool get isAdmin => me['is_admin'] == true;
   bool get isDeveloper => me['is_developer'] == true;
-  bool get isCore => me['is_core'] == true;
+  bool get isCore => me['is_core'] == true; // admin or super admin
+  bool get isSuper => me['is_super'] == true;
+  bool get isPublic => me['is_public'] == true;
+  bool get isMember => api != null && boot != null && !isPublic;
+  Json get permissions => (me['permissions'] as Json?) ?? const {};
+  bool can(String perm) => permissions.containsKey(perm);
+  bool allWings(String perm) => permissions[perm] == 'all';
+  Set<int> wingsFor(String perm) =>
+      ((((boot?['leadable'] as Json?) ?? const {})[perm] as List?) ?? []).cast<int>().toSet();
+  List<Json> committeesFor(String perm) =>
+      committees.where((c) => wingsFor(perm).contains(c['id'])).toList();
+
+  /// Talks to the server with the signed-in token when there is one (public pages work without).
+  ApiClient get client => api ?? ApiClient(baseUrl: server);
   bool get canLead => me['can_lead'] == true;
   bool get canManagePeople => me['can_manage_people'] == true;
   Set<int> get headedIds =>
       ((me['headed_ids'] as List?) ?? []).cast<int>().toSet();
   Set<int> get leadableIds =>
       ((boot?['leadable_ids'] as List?) ?? []).cast<int>().toSet();
-  bool canManageCommittee(int id) => isCore || headedIds.contains(id);
+  bool canManageCommittee(int id) => wingsFor('people').contains(id);
 
   List<Json> get committees =>
       ((boot?['committees'] as List?) ?? []).cast<Json>();
@@ -99,8 +111,10 @@ class AppState extends ChangeNotifier {
       shortName = (c['short_name'] as String?) ?? shortName;
       notifyListeners();
       final fb = c['firebase'];
-      if (fb is Map && api != null) await _initPush(fb.cast<String, dynamic>());
-      if (fb is Map) _firebase = fb.cast<String, dynamic>();
+      if (fb is Map) {
+        _firebase = fb.cast<String, dynamic>();
+        await _initPush(_firebase!); // everyone gets public notifications, signed in or not
+      }
     } catch (_) {}
   }
 
@@ -118,6 +132,7 @@ class AppState extends ChangeNotifier {
     _poll = Timer.periodic(const Duration(minutes: 2), (_) => refreshCounts());
     if (_firebase != null) {
       _initPush(_firebase!);
+      if (_pushToken != null) _registerToken(_pushToken!);
     } else {
       _loadConfig();
     }
@@ -154,6 +169,21 @@ class AppState extends ChangeNotifier {
     await _signedIn(r['token'] as String);
   }
 
+  Future<void> register(String name, String phone, String password) async {
+    final r = await ApiClient(baseUrl: server).post('public/register', {
+      'name': name,
+      'phone': phone,
+      'password': password,
+      'device': Platform.isIOS ? 'iPhone app' : 'Android app',
+    });
+    await _signedIn(r['token'] as String);
+  }
+
+  Future<String> requestPasswordReset(String phone) async {
+    final r = await ApiClient(baseUrl: server).post('public/password-reset', {'phone': phone});
+    return (r['message'] as String?) ?? 'Request sent.';
+  }
+
   Future<Json> checkInvite(String code) =>
       ApiClient(baseUrl: server).post('auth/invite/check', {'code': code});
 
@@ -174,13 +204,7 @@ class AppState extends ChangeNotifier {
       }
       await api?.post('auth/logout');
     } catch (_) {}
-    if (_pushReady) {
-      try {
-        await FirebaseMessaging.instance.unregister();
-      } catch (_) {}
-    }
-    _pushToken = null;
-    _pushStarted = false;
+    // The phone keeps receiving public notifications; only the account link is removed.
     api = null;
     boot = null;
     counts = const {};
@@ -192,8 +216,6 @@ class AppState extends ChangeNotifier {
   Future<void> deleteAccount(String password) async {
     await api!.post('auth/delete', {'password': password});
     _poll?.cancel();
-    _pushToken = null;
-    _pushStarted = false;
     api = null;
     boot = null;
     counts = const {};
@@ -252,7 +274,7 @@ class AppState extends ChangeNotifier {
 
   // ---- push notifications (Firebase, configured on the server) --------------
   Future<void> _initPush(Json fb) async {
-    if (api == null || _pushStarted) return;
+    if (_pushStarted) return;
     _pushStarted = true;
     try {
       if (Firebase.apps.isEmpty) {
@@ -270,13 +292,15 @@ class AppState extends ChangeNotifier {
       await fm.requestPermission();
       // iPhone: show banners while the app is open too (Android shows an in-app snackbar instead).
       await fm.setForegroundNotificationPresentationOptions(alert: false, badge: true, sound: true);
-      _pushReady = true;
       if (!_listening) {
         _listening = true;
         // Fires once registered, and again whenever Firebase rotates the token.
         fm.onRegistered.listen(_registerToken);
       }
       await fm.register();
+      try {
+        await fm.subscribeToTopic('public');
+      } catch (_) {}
       if (_handlers) return;
       _handlers = true;
       FirebaseMessaging.onMessage.listen((m) {
@@ -310,8 +334,8 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> _registerToken(String token) async {
-    if (api == null) return;
     _pushToken = token;
+    if (api == null) return;
     try {
       await api?.post('devices', {'token': token});
     } catch (_) {}

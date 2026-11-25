@@ -4,7 +4,9 @@ import 'package:material_ui/material_ui.dart';
 import 'screens/announcements.dart';
 import 'screens/committees.dart';
 import 'screens/home.dart';
-import 'screens/login.dart';
+import 'screens/duties.dart';
+import 'screens/inbox.dart';
+import 'screens/public.dart';
 import 'screens/meetings.dart';
 import 'screens/tasks.dart';
 import 'state.dart';
@@ -152,8 +154,8 @@ class UnitApp extends StatelessWidget {
         ),
         child: app.loading
             ? const _Splash(key: ValueKey('splash'))
-            : app.api == null
-            ? const LoginScreen(key: ValueKey('login'))
+            : !app.isMember
+            ? PublicShell(key: ValueKey('public-${app.api != null}'))
             : const Shell(key: ValueKey('shell')),
       ),
     );
@@ -180,7 +182,7 @@ class _ShellState extends State<Shell> {
 
   Widget _root(int i) => switch (i) {
     0 => const HomeScreen(),
-    1 => const TasksScreen(),
+    1 => const WorkTab(),
     2 => const AnnouncementsScreen(),
     3 => const MeetingsScreen(),
     _ => const CommitteesScreen(),
@@ -200,6 +202,9 @@ class _ShellState extends State<Shell> {
       'task' => (1, TaskDetailScreen(id: t.id) as Widget),
       'announcement' => (2, AnnouncementDetailScreen(id: t.id)),
       'meeting' => (3, MeetingDetailScreen(id: t.id)),
+      'responsibility' => (1, ResponsibilityDetailScreen(id: t.id)),
+      'public' => (0, PostDetailScreen(id: t.id)),
+      'reset' => (4, const ResetRequestsScreen()),
       _ => (0, null),
     };
     setState(() => _index = tab);
@@ -232,7 +237,7 @@ class _ShellState extends State<Shell> {
         selectedIcon: CountBadge(rsvp, child: const Icon(Icons.event_rounded)),
         label: 'Meetings',
       ),
-      const NavigationDestination(icon: Icon(Icons.groups_outlined), selectedIcon: Icon(Icons.groups_rounded), label: 'Committees'),
+      const NavigationDestination(icon: Icon(Icons.groups_outlined), selectedIcon: Icon(Icons.groups_rounded), label: 'Wings'),
     ];
     return PopScope(
       canPop: false,

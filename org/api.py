@@ -684,6 +684,8 @@ def home(request):
         },
         "counts": c,
         "my_tasks": [task_json(t) for t in my_tasks],
+        "duties": [x for x in (responsibility_json(r, p) for r in me.responsibilities.filter(active=True)
+                               .select_related("committee", "holder__user")) if x["due"]],
         "announcements": announcements,
         "meetings": [meeting_json(m, p) for m in meetings],
         "overview": overview,

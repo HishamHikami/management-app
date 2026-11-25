@@ -64,6 +64,10 @@ class ApiClient {
     () => _http.patch(_uri(path), headers: _headers, body: jsonEncode(body)),
   );
 
+  Future<Json> put(String path, Json body) => _send(
+    () => _http.put(_uri(path), headers: _headers, body: jsonEncode(body)),
+  );
+
   Future<Json> delete(String path) =>
       _send(() => _http.delete(_uri(path), headers: _headers));
 
