@@ -56,13 +56,27 @@ Also pending for the next iOS workflow change:
      office-bearers, or per person (a "show my number publicly" switch)? (Privacy policy gets updated.)
    - Photos of office-bearers: yes/no?
 
-5. **First-time import from the owner's Excel sheet** (run on the server by the droplet session):
-   - Create **every person** from the sheet as a member record, with their wing/committee, role
-     (head/member), designation, phone/email, and the **responsibilities** they already hold.
-   - Nobody can log in yet: no password, no invite code sent automatically.
-   - A **People** section lists everyone with their status (*Not invited* / *Invite sent* / *Active*)
-     and a **Send invite code** button (WhatsApp/copy, as today). Only after they use the code do
-     they become a registered (active) user.
-   - Plain members (no committee role) are imported too and appear in People.
-   Needed from the owner: the Excel sheet itself, or at least its column headings and 2–3 sample rows,
-   so the importer matches it (it can be uploaded in the droplet session; personal data stays on the server).
+5. **Member structure from the owner's sheet** (the import itself is done once on the server by the
+   droplet session: **no import feature in the app**, and no real data in this repo).
+   Sheet layout (structure only): one row per person with
+   `Sl. No. | Name | Mobile No. | Unit Place | Member Type | Wing | Position 1 | Position 2 | Comments`.
+   What the app needs to model it:
+   - **Unit Place**: the local area a person belongs to (8 areas, e.g. Malaz, Batha, Olaya East/West,
+     Suwaid, Garnatha, Iskaan). New field on each person, filter in People / Who's who.
+   - **Member Type**: *Executive* or *Member*.
+   - **Wings**: the sheet's wings (Youth, Dawa, QHLS, Finance, Umrah, Media, Social Media / PRO,
+     Social Welfare, Education, Publicity, Career & Sports, ORG). A person can be in **two wings**,
+     with **Position 1** for the first and **Position 2** for the second.
+   - **Positions**: organisation level *President, Secretary, Treasurer* (office-bearers) and wing level
+     *Chairman, Asst. Chairman, Convenor, Member*.
+   - **Comments**: private admin notes (e.g. membership form not filled) + a *needs follow-up* flag:
+     never public.
+   - Some people have no mobile number yet: allowed; they can't be sent an invite until one is added.
+   - **People** section: everyone listed with status *Not invited / Invite sent / Active* and a
+     **Send invite code** button; only after using the code do they become active users.
+   Open questions:
+   - Is **Executive** the same as the **core committee** (can assign work, post to everyone)?
+   - Wing **Chairman** = head (full control of the wing). Do **Asst. Chairman** and **Convenor** also get
+     head rights, or are they designations only?
+   - Rename "Committees" to **"Wings"** throughout the app? (Assumed yes.)
+   - "EXIT" in the wing column: a person who left; import as inactive?
